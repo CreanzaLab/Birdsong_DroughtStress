@@ -42,3 +42,17 @@ main { flex: 1; min-height: 0; display: flex; }
 #overlay .card { background: var(--parchment-50); border: 1px solid var(--line); border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.18); margin-top: -1px; }
 #oname { font-size: 10px; color: var(--muted); padding: 2px 3px 0; max-width: 520px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .js-plotly-plot .plotly .modebar { background: transparent !important; }
+
+.nav { display: inline-flex; gap: 4px; margin-right: 10px; }
+#glossary { flex: 1; overflow: auto; padding: 24px 32px; }
+#glossary[hidden] { display: none; }
+#glossary .wrap { max-width: 860px; margin: 0 auto; }
+#glossary h2 { font-family: Newsreader, Georgia, serif; font-weight: 500; font-size: 24px; margin: 0; }
+#glossary .sub { color: var(--muted); font-family: Newsreader, Georgia, serif; font-style: italic; margin: 2px 0 20px; }
+#glossary h3 { font-family: Newsreader, Georgia, serif; font-weight: 500; font-size: 17px; border-bottom: 1px solid var(--line); padding-bottom: 3px; margin: 22px 0 8px; }
+#glossary .intro { font-size: 13px; color: var(--ink-soft); line-height: 1.55; margin: 0 0 10px; }
+#glossary dl { margin: 0; }
+#glossary .term { display: grid; grid-template-columns: 200px 1fr; gap: 12px; align-items: baseline; padding: 2px 0; }
+#glossary dt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #234f4f; text-align: right; }
+#glossary dd { margin: 0; font-size: 13px; color: var(--ink-soft); }
+body.page-glossary .row:not(:first-child) { display: none; }

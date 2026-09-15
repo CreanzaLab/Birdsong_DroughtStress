@@ -91,6 +91,106 @@ function buildControls() {
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { unpin(); stopAudio(); } });
 }
 
+/* ------------------------------------------------------------------ glossary */
+const GLOSSARY = [
+  { title: 'Reading the atlas', intro: 'Every point is one Chipper-segmented syllable. Hover a point to see its spectrogram (time left→right, 0–10 kHz bottom→top, darkness = energy; each bout image is auto-levelled to its own peak over a 55 dB window). In bout-path mode the whole song is shown, the brass bar under the spectrogram marks the hovered syllable\'s onset→offset, and the black line on the plot joins the song\'s syllables in order 1→2→3…  Click a point to pin it; Esc closes.',
+    terms: [
+      ['syllable', 'A Chipper onset→offset unit inside a bout. Names read "recording bout n · syll k/n".'],
+      ['bout', 'One song extracted from a longer recording (the wav Chipper was run on).'],
+      ['bout path', 'The polyline through all syllables of the hovered syllable\'s bout, in the current X/Y(/Z) axes.'],
+      ['QA flags', 'Per-bout alignment checks (see below). Flagged bouts are hidden by default; untick "hide QA-flagged bouts" to show them.'],
+    ] },
+  { title: 'Where the boundaries come from', intro: 'Chipper stores onsets/offsets as sonogram pixel columns. Its sonogram is ~3 175 samples wider than the audio (STFT padding) with the padding split evenly at both ends, so audio time = px × ms/px − pad/2. Every bout is checked: syllables must be louder than the gaps between them at exactly that shift.',
+    terms: [
+      ['length_mismatch', 'The wav is not the audio the gzip was made from (different extraction of the same bout). All such wavs were replaced from Box copies whose length matches.'],
+      ['misaligned', 'The energy-maximising shift is more than 12 ms from the derived shift.'],
+      ['weak_contrast', 'Syllables are less than 6 dB louder than the gaps (noisy recording).'],
+      ['outside_audio', 'An onset or offset falls outside the wav.'],
+      ['bout_hpf_hz / bout_lpf_hz', 'Chipper\'s high-/low-pass cutoffs for the bout (its FrequencyFilter). All spectral features below are computed inside this band and inside the syllable\'s onset→offset.'],
+    ] },
+  { title: 'Original 2022 analysis', intro: 'Values joined from AnalyzedData/2022-11-15_NoteAnalysisBySyll…csv (Snyder, Sellers & Creanza 2025 pipeline). Present only for the 1 575 bouts used in that analysis.',
+    terms: [
+      ['table_duration_ms', 'Syllable duration from the Chipper output (ms).'],
+      ['table_upper_freq_hz / table_lower_freq_hz', 'Highest / lowest frequency with signal in Chipper\'s thresholded sonogram for the syllable.'],
+      ['table_freq_mod_hz', 'Upper minus lower frequency (Chipper\'s "frequency modulation").'],
+      ['table_n_notes', 'Number of notes Chipper found inside the syllable.'],
+      ['cluster_2022', 'Syllable-type cluster id from the June 2022 clustering (Clust20220619.Overall); 0 / NA = unassigned.'],
+      ['syllable_pattern_id', 'Within-bout syllable-type id from Chipper (repeats of the same type share an id).'],
+      ['removed_as_whistle / probable_whistle', 'Flags from the 2022 note analysis.'],
+    ] },
+  { title: 'Chipper (from gzip)', intro: 'The same quantities recomputed directly from every gzip, so they exist for all 1 804 bouts.',
+    terms: [
+      ['chipper_duration_ms', '(offset − onset) × ms per pixel.'],
+      ['chipper_upper_freq_hz / chipper_lower_freq_hz', 'First / last sonogram row with signal, converted with hz per pixel, exactly as the original script.'],
+      ['chipper_freq_range_hz', 'Upper minus lower.'],
+    ] },
+  { title: 'Viterbi peak track (newFM)', intro: 'Port of 02_CalculateSyllableMetrics_newFM.R: an adaptive-window spectrogram of the syllable, restricted to Chipper\'s syllable frequency bounds and to frames within 20 dB of the syllable peak; a Viterbi dynamic-programming path follows the loudest frequency with a 0.05-per-kHz jump penalty; onset/offset artifacts are trimmed and a 3-point median filter applied.',
+    terms: [
+      ['vit_peak_freq_med_hz', 'Median of the tracked peak-frequency contour.'],
+      ['vit_peak_freq_max_hz / vit_peak_freq_min_hz', 'Extremes of the (median-filtered) contour.'],
+      ['vit_peak_bandwidth_hz', 'Max − min of the contour.'],
+      ['vit_fm_raw_khz_s', 'Mean |slope| of the raw contour (kHz per second).'],
+      ['vit_fm_filtered_khz_s', 'Mean |slope| after the 3-point median filter — the newFM measure.'],
+    ] },
+  { title: 'Spectral', terms: [
+      ['peak_frequency_hz', 'Bin with the most energy in the syllable\'s mean spectrum.'],
+      ['mean_frequency_hz', 'Power-weighted mean frequency, averaged over frames.'],
+      ['freq_lo_5pct_hz / freq_hi_95pct_hz', 'Frequencies below which 5 % / 95 % of the syllable\'s energy lies — a robust bandwidth.'],
+      ['spectral_centroid', '"Centre of mass" of the spectrum (Hz) — high = bright.'],
+      ['spectral_bandwidth', 'Spread of energy around the centroid (Hz).'],
+      ['spectral_rolloff', 'Frequency below which 85 % of the energy lies.'],
+      ['spectral_flatness', '0 = pure tone … 1 = noise.'],
+      ['spectral_flux_mean', 'How fast the spectrum changes frame to frame.'],
+      ['zcr_mean', 'Zero-crossing rate.'],
+    ] },
+  { title: 'Pitch', terms: [
+      ['f0_median / f0_min / f0_max / f0_std', 'pyin fundamental-frequency contour statistics (1–10 kHz search range).'],
+      ['pitch_confidence', 'Mean pyin voicing probability (0–1).'],
+      ['pitch_goodness', 'Sound Analysis Pro "goodness of pitch": prominence of the cepstral peak; high for clean harmonic sounds.'],
+    ] },
+  { title: 'Entropy & modulation', terms: [
+      ['spectral_entropy', 'Normalised Shannon entropy of the spectrum — low for tones, high for noise.'],
+      ['temporal_entropy', 'How evenly energy is spread over the syllable\'s duration.'],
+      ['wiener_entropy', 'Mean log spectral flatness (SAP tonality): ≈0 noise, large-negative pure tone.'],
+      ['fm_mean', 'Mean |Δ centroid| per frame (Hz) — a crude frequency-modulation measure; prefer vit_fm_*.'],
+      ['am_mean', 'Mean |Δ log power| per frame — amplitude modulation.'],
+      ['rms_mean', 'Mean RMS amplitude (bout audio is peak-normalised, so comparable within a bout only).'],
+      ['attack_time', 'Seconds from onset to the RMS peak.'],
+    ] },
+  { title: 'Position in bout', terms: [
+      ['syll_num / n_sylls_in_bout / rel_position', 'Order in the song, song length in syllables, and (k−1)/(n−1).'],
+      ['onset_ms / offset_ms', 'In audio time (padding removed).'],
+      ['gap_before_ms / gap_after_ms', 'Silence to the neighbouring syllables.'],
+      ['bout_duration_ms', 'Length of the bout wav.'],
+    ] },
+  { title: 'Recording metadata (colour / filter)', terms: [
+      ['recording', 'Macaulay Library catalogue number, Xeno-canto id, or self-recording id.'],
+      ['source', 'ML = Macaulay Library, XC = Xeno-canto, Self = own 2017 Ithaca recordings.'],
+      ['era', 'Pre / Post the 2016 western-New-York drought (plus Pre2006, During, 2020-2021).'],
+      ['region', 'Drought vs Control region as redefined Aug 2022 (RegionPostAug22); region_orig is the earlier definition.'],
+      ['era_region', 'The era × region combination, e.g. Pre-Drought, Post-Control.'],
+      ['in_final_table', 'Whether the bout is in the 2022 bout-stats table used for the paper.'],
+      ['latitude / longitude / year_num', 'Recording location and year (numeric, usable as axes).'],
+    ] },
+];
+function renderGlossary() {
+  const g = $('glossary');
+  if (g.dataset.done) return;
+  g.dataset.done = '1';
+  const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  g.innerHTML = `<div class="wrap"><h2>Glossary</h2><p class="sub">What every axis, colour and flag means — and how the syllables were cut out.</p>` +
+    GLOSSARY.map((sec) => `<h3>${esc(sec.title)}</h3>${sec.intro ? `<p class="intro">${esc(sec.intro)}</p>` : ''}<dl>` +
+      sec.terms.map(([n, d]) => `<div class="term"><dt>${esc(n)}</dt><dd>${esc(d)}</dd></div>`).join('') + '</dl>').join('') + '</div>';
+}
+function showPage(pg) {
+  document.querySelectorAll('[data-page]').forEach((b) => b.classList.toggle('on', b.dataset.page === pg));
+  document.body.classList.toggle('page-glossary', pg === 'glossary');
+  $('plot').hidden = pg !== 'atlas'; $('glossary').hidden = pg !== 'glossary';
+  if (pg === 'glossary') { renderGlossary(); if (state.pinned == null) $('detail').hidden = true; }
+  else { if (state.pinned != null) $('detail').hidden = false; if (gd.data) Plotly.relayout(gd, { width: gd.clientWidth, height: gd.clientHeight }); }
+}
+document.querySelectorAll('[data-page]').forEach((b) => b.addEventListener('click', () => showPage(b.dataset.page)));
+
 function prettyName(c) {
   return c.replace(/_hz$/, ' (Hz)').replace(/_ms$/, ' (ms)').replace(/_/g, ' ');
 }
@@ -178,12 +278,19 @@ function layout(dims) {
 
 let tweenRaf = 0;
 function redraw() {
-  const [idx, err] = applyFilters();
+  let [idx, err] = applyFilters();
+  const dims3 = !!state.z, MAX_3D = 8000;
+  let note = '';
+  if (dims3 && idx.length > MAX_3D) {           // scatter3d + per-hover updates freeze past ~10k points
+    const step = idx.length / MAX_3D;
+    idx = Array.from({ length: MAX_3D }, (_, k) => idx[Math.floor(k * step)]);
+    note = `  ·  3D shows an evenly spaced subsample of ${MAX_3D.toLocaleString()} (clear Z for all points)`;
+  }
   filteredIdx = idx;
   const [traces, n] = buildTraces(idx);
   const dims = state.z ? 3 : 2;
   const sig = `${dims}|${state.color}|${state.logx}|${state.logy}|${idx.length}|${idx[0]}|${idx[idx.length - 1]}|${traces.slice(0, nDataTraces).map((t) => t.name).join('~')}`;
-  $('status').textContent = `${n.toLocaleString()} of ${N.toLocaleString()} syllables` + (err ? `  ·  filter error: ${err}` : '');
+  $('status').textContent = `${n.toLocaleString()} of ${N.toLocaleString()} syllables` + note + (err ? `  ·  filter error: ${err}` : '');
   const cfg = { displaylogo: false, scrollZoom: true, responsive: true, modeBarButtonsToRemove: ['lasso2d', 'select2d'] };
   cancelAnimationFrame(tweenRaf);
   if (sig !== drawnSig || !gd.data || dims === 3) {
@@ -219,11 +326,14 @@ function bindPlotEvents() {
   gd.on('plotly_click', (e) => { const p = e.points?.[0]; if (p && p.curveNumber < nDataTraces) pin(p.customdata); });
   document.addEventListener('mousemove', (ev) => { mouse.x = ev.clientX; mouse.y = ev.clientY; });
   gd.addEventListener('mouseleave', onUnhover);
-  const fit = () => gd.data && Plotly.relayout(gd, { width: gd.clientWidth, height: gd.clientHeight });
+  gd.addEventListener('mousedown', () => { dragging = true; onUnhover(); }, true);
+  window.addEventListener('mouseup', () => { dragging = false; }, true);
+  const fit = () => { if (gd.data && !gd.hidden && gd.clientWidth > 0 && gd.clientHeight > 0) Plotly.relayout(gd, { width: gd.clientWidth, height: gd.clientHeight }); };
   window.addEventListener('resize', fit);
   new ResizeObserver(fit).observe(gd);   // also fires when the detail panel opens/closes
 }
 const mouse = { x: 0, y: 0 };
+let dragging = false;   // Plotly cancels a pan if we restyle mid-drag, so hover is ignored while the button is down
 
 /* ------------------------------------------------------------------ path + highlight */
 function setPath(i) {
@@ -238,6 +348,7 @@ function setPath(i) {
 }
 function setHighlight(i) {
   const hi = nDataTraces + 1, dims = state.z ? 3 : 2;
+  if (dims === 3) return;   // every scatter3d restyle re-uploads the whole scene; the hover overlay is enough in 3D
   if (i == null) { Plotly.restyle(gd, { x: [[]], y: [[]], ...(dims === 3 ? { z: [[]] } : {}) }, [hi]); return; }
   Plotly.restyle(gd, { x: [[axisVal(state.x, i)]], y: [[axisVal(state.y, i)]], ...(dims === 3 ? { z: [[axisVal(state.z, i)]] } : {}) }, [hi]);
 }
@@ -245,7 +356,7 @@ function setHighlight(i) {
 /* ------------------------------------------------------------------ hover */
 let lastHover = null;
 function onHover(i) {
-  if (i === lastHover) return;
+  if (dragging || i === lastHover) return;
   lastHover = i; state.hovered = i;
   const ov = $('overlay');
   drawSyllable($('ocanvas'), i, state.hover === 'bout' ? 'bout' : 'syllable', state.hover === 'bout' ? 560 : 260).then(() => {
@@ -261,6 +372,7 @@ function onHover(i) {
   if (state.play !== 'off') playRow(i, state.play);
 }
 function onUnhover() {
+  if (dragging && lastHover == null) return;
   lastHover = null; state.hovered = null;
   $('overlay').hidden = true;
   stopAudio();

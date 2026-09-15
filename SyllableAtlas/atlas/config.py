@@ -33,7 +33,7 @@ PYIN_FRAME = 1024
 PYIN_HOP = 128
 MIN_PYIN_SAMPLES = 2048         # clips shorter than this skip pitch tracking (NaN)
 ROLLOFF_PERCENT = 0.85
-FEATURE_HIGHPASS_HZ = 500.0      # remove wind/handling rumble before per-syllable features (audio + images are NOT filtered)
+FEATURE_HIGHPASS_HZ = 500.0      # floor for the per-bout band-pass when Chipper's own high-pass was lower (audio + images are NOT filtered)
 
 # ---- Chipper alignment -----------------------------------------------------
 # Chipper's sonogram is wider than the audio by ~3175 samples regardless of

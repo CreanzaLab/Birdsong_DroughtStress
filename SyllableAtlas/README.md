@@ -53,11 +53,18 @@ For each `SegSyllsOutput_<rec>_bout<n>.gzip` with a matching wav:
    shift), `weak_contrast` (<6 dB), `outside_audio`. See `atlas_data/qa_report.md`
    and `qa_bouts.csv`. The web app hides flagged bouts by default (toggle in the
    filter bar) and marks them ⚠ on hover.
-4. **Assets** — the bout is resampled to 44.1 kHz and written as a 16-bit wav; a
+4. **Bounding box** — spectral features are computed strictly inside Chipper's box:
+   the syllable's onset→offset in time, and the bout's `FrequencyFilter` (high-pass /
+   low-pass rows × Hz-per-pixel, rows counted from 0 Hz) in frequency. The clip is
+   band-pass filtered to that band (floor 500 Hz) and STFT bins outside it are zeroed.
+   The Viterbi peak track is further restricted to the *syllable's* Chipper
+   lower/upper frequency bounds, as in the R script. Saved audio and images are
+   unfiltered.
+5. **Assets** — the bout is resampled to 44.1 kHz and written as a 16-bit wav; a
    greyscale spectrogram PNG (1 px per 128-sample frame, 0–10 kHz, no margins) is
    rendered once per bout. The browser crops syllables out of the bout image and
    plays sub-ranges of the bout audio, so there are no per-syllable files.
-5. **Features** per syllable (`atlas/features.py`; MFCCs, spectral-contrast bands
+6. **Features** per syllable (`atlas/features.py`, `atlas/viterbi.py`; MFCCs, spectral-contrast bands
    and the harmonic HNR/inharmonicity measures are deliberately excluded):
    - *Original 2022 analysis* (joined from `AnalyzedData/2022-11-15_NoteAnalysisBySyll…csv`):
      `table_duration_ms`, `table_freq_mod_hz`, `table_upper_freq_hz`,
@@ -66,6 +73,11 @@ For each `SegSyllsOutput_<rec>_bout<n>.gzip` with a matching wav:
    - *Chipper (from gzip)*: duration and upper/lower frequency recomputed from the
      thresholded sonogram exactly as the original script did (`chipper_*`); these
      exist for all 1 804 bouts, the table values only for the 1 575 analysed ones.
+   - *Viterbi peak track (newFM)*: a Python port of
+     `02_CalculateSyllableMetrics_newFM.R` — adaptive-window spectrogram, −20 dB frame
+     mask, Viterbi dynamic-programming peak-frequency path (0.05/kHz jump penalty),
+     edge-artifact trimming, 3-point median: `vit_peak_freq_med/max/min_hz`,
+     `vit_peak_bandwidth_hz`, `vit_fm_raw_khz_s`, `vit_fm_filtered_khz_s`.
    - *Spectral*: peak / mean frequency, 5 % and 95 % energy frequencies, centroid,
      bandwidth, roll-off, flatness, flux, zero-crossing rate.
    - *Pitch*: pyin f0 median/min/max/std (1–10 kHz), voicing confidence, SAP
@@ -76,15 +88,19 @@ For each `SegSyllsOutput_<rec>_bout<n>.gzip` with a matching wav:
      onset/offset (audio ms), gaps before/after, bout duration.
    - *Location & time*: latitude, longitude, year.
    - Categorical: recording, bout, source (ML/XC/Self), era, region
-     (`RegionPostAug22`), original region, state, county, year, recordist,
-     in-final-table, QA flags.
+     (`RegionPostAug22`), **era_region** (Pre-Drought, Post-Control, …), original
+     region, state, county, year, recordist, in-final-table, QA flags.
 
 Outputs: `syllables.csv` (one row per syllable — also handy in R), `syllables.json`
 and `bouts.json` (what the web app loads), `meta.json` (field groups + docs).
 
 ## Using the atlas
 
-- **Axes**: X / Y / optional Z (3-D) from any numeric feature; log toggles.
+- **Atlas / Glossary** tabs: the glossary explains every axis, colour, flag and how
+  the boundaries were derived.
+- **Axes**: X / Y / optional Z (3-D) from any numeric feature; log toggles. 3-D shows
+  an evenly spaced subsample of 8 000 points (scatter3d cannot re-render tens of
+  thousands of points on every hover).
 - **Color**: any categorical field (grouped legend, click to isolate) or numeric
   feature (continuous scale).
 - **Filters**: region / era / source / state multi-selects, "only bouts in the 2022
@@ -104,6 +120,7 @@ SyllableAtlas/
   atlas/config.py    every tunable (paths, FFT sizes, alignment thresholds, render params)
   atlas/chipper.py   gzip reader, name normalisation, onset alignment + QA
   atlas/features.py  per-syllable features
+  atlas/viterbi.py   Viterbi peak-frequency track + newFM (port of 02_CalculateSyllableMetrics_newFM.R)
   atlas/render.py    bout spectrogram PNG
   atlas/build.py     the pipeline (multiprocess, resumable) + table assembly + QA report
   serve.py           tiny static server

@@ -29,6 +29,7 @@ import numpy as np
 
 from . import config
 from .chipper import align, load_gzip, norm_key, norm_rec
+from .viterbi import peak_metrics
 
 csv.field_size_limit(10**9)
 
@@ -54,13 +55,16 @@ GROUPS = [
     ("Chipper (from gzip)", ["chipper_duration_ms", "chipper_upper_freq_hz", "chipper_lower_freq_hz", "chipper_freq_range_hz"]),
     ("Spectral", ["peak_frequency_hz", "mean_frequency_hz", "freq_lo_5pct_hz", "freq_hi_95pct_hz", "spectral_centroid",
                   "spectral_bandwidth", "spectral_rolloff", "spectral_flatness", "spectral_flux_mean", "zcr_mean"]),
+    ("Viterbi peak track (newFM)", ["vit_peak_freq_med_hz", "vit_peak_freq_max_hz", "vit_peak_freq_min_hz", "vit_peak_bandwidth_hz",
+                                    "vit_fm_raw_khz_s", "vit_fm_filtered_khz_s"]),
     ("Pitch", ["f0_median", "f0_min", "f0_max", "f0_std", "pitch_confidence", "pitch_goodness"]),
     ("Entropy & modulation", ["spectral_entropy", "temporal_entropy", "wiener_entropy", "fm_mean", "am_mean", "rms_mean", "attack_time"]),
     ("Position in bout", ["syll_num", "n_sylls_in_bout", "rel_position", "onset_ms", "offset_ms", "gap_before_ms", "gap_after_ms",
                           "bout_duration_ms", "duration_ms"]),
     ("Location & time", ["latitude", "longitude", "year_num"]),
+    ("Chipper bout settings", ["bout_hpf_hz", "bout_lpf_hz"]),
 ]
-CATEGORICAL = ["recording", "bout_key", "source", "era", "region", "region_orig", "state", "county", "year", "recordist",
+CATEGORICAL = ["recording", "bout_key", "source", "era", "region", "era_region", "region_orig", "state", "county", "year", "recordist",
                "cluster_2022", "syllable_pattern_id", "in_final_table", "removed_as_whistle", "probable_whistle",
                "used_data", "qa_ok", "qa_flags"]
 
@@ -115,8 +119,17 @@ def process_bout(job):
         if peak > 0:
             y = y / peak * 0.9
         al = align(bout, y, sr_native, n_native)
+        # Chipper's bounding box in frequency: FrequencyFilter = [high-pass row, low-pass row] counted from 0 Hz
         from scipy.signal import butter, sosfiltfilt
-        sos = butter(4, config.FEATURE_HIGHPASS_HZ, btype="highpass", fs=config.SR, output="sos")
+        ff = bout.params.get("FrequencyFilter", [0, bout.n_rows])
+        hpf_hz = max(float(ff[0]) * bout.hz_per_px, config.FEATURE_HIGHPASS_HZ)
+        lpf_hz = min(float(ff[1]) * bout.hz_per_px, config.SR / 2 * 0.98)
+        if lpf_hz <= hpf_hz + 100:
+            lpf_hz = config.SR / 2 * 0.98
+        if lpf_hz < config.SR / 2 * 0.98:
+            sos = butter(4, [hpf_hz, lpf_hz], btype="bandpass", fs=config.SR, output="sos")
+        else:
+            sos = butter(4, hpf_hz, btype="highpass", fs=config.SR, output="sos")
         y_hp = sosfiltfilt(sos, y).astype(np.float32)          # features only; saved audio/PNG stay unfiltered
 
         sf.write(str(config.AUDIO_DIR / f"{key}.wav"), y, config.SR, subtype="PCM_16")
@@ -130,7 +143,8 @@ def process_bout(job):
             a, b = al.onsets_ms[i], al.offsets_ms[i]
             ia, ib = max(0, int(round(a / 1000 * config.SR))), min(y.size, int(round(b / 1000 * config.SR)))
             clip = y_hp[ia:ib] if ib > ia else np.zeros(config.N_FFT, dtype=np.float32)
-            feats = F.compute(clip, config.SR)
+            feats = F.compute(clip, config.SR, band_hz=(hpf_hz, lpf_hz))
+            feats.update(peak_metrics(clip, config.SR, _num(lo_hz[i]), _num(up_hz[i])))
             feats.update({
                 "syll_num": i + 1, "n_sylls_in_bout": n, "rel_position": (i / (n - 1)) if n > 1 else 0.0,
                 "onset_ms": float(a), "offset_ms": float(b),
@@ -146,6 +160,7 @@ def process_bout(job):
             "wav_src": os.path.basename(str(wav_path)), "sr_native": int(sr_native), "n_native": n_native,
             "duration_ms": dur_ms, "n_sylls": n, "png": f"img/{key}.png", "audio": f"audio/{key}.wav",
             "img_w": w, "img_h": h, "px_per_ms": px_per_ms(), "fmax_hz": config.RENDER_FMAX,
+            "hpf_hz": hpf_hz, "lpf_hz": lpf_hz,
             "onsets_ms": [float(v) for v in al.onsets_ms], "offsets_ms": [float(v) for v in al.offsets_ms],
             "chipper_ms_per_px": bout.ms_per_px, "chipper_params": {k: (float(v) if isinstance(v, (int, float)) else v)
                                                                     for k, v in bout.params.items() if k != "BoutRange"},
@@ -194,6 +209,8 @@ def assemble():
                 "latitude": _num(m.get("Latitude")), "longitude": _num(m.get("Longitude")), "year_num": _num(m.get("year")),
             }
             row.update({v: (m.get(k) or "NA") for k, v in META_CATEG.items()})
+            row["era_region"] = f"{row['era']}-{row['region']}"
+            row["bout_hpf_hz"] = b.get("hpf_hz"); row["bout_lpf_hz"] = b.get("lpf_hz")
             row.update(_clean(s))
             if t:
                 row.update({v: _num(t[k]) for k, v in TABLE_NUMERIC.items()})

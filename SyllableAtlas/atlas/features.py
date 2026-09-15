@@ -14,6 +14,12 @@ _EPS = 1e-10
 
 FEATURE_DOC = {
     "duration_ms": "syllable length from Chipper onset to offset (ms)",
+    "vit_peak_freq_med_hz": "median of the Viterbi-tracked peak-frequency contour (Hz), constrained to Chipper's syllable frequency bounds",
+    "vit_peak_freq_max_hz": "maximum of the Viterbi peak-frequency contour (Hz)",
+    "vit_peak_freq_min_hz": "minimum of the Viterbi peak-frequency contour (Hz)",
+    "vit_peak_bandwidth_hz": "max minus min of the Viterbi peak-frequency contour (Hz)",
+    "vit_fm_raw_khz_s": "frequency modulation: mean |slope| of the raw Viterbi peak contour (kHz/s)",
+    "vit_fm_filtered_khz_s": "frequency modulation after a 3-point median filter of the contour (kHz/s) -- the newFM measure",
     "rms_mean": "mean RMS amplitude",
     "peak_frequency_hz": "frequency bin with the most energy in the mean spectrum",
     "mean_frequency_hz": "power-weighted mean frequency, averaged over frames",
@@ -94,12 +100,20 @@ def _pitch(y, sr):
     return float(np.median(v)), float(np.std(v)), float(v.min()), float(v.max()), float(np.mean(vprob[voiced]))
 
 
-def compute(y: np.ndarray, sr: int) -> dict[str, float]:
-    """Features for one syllable clip (mono float, sr = config.SR)."""
+def compute(y: np.ndarray, sr: int, band_hz: tuple[float, float] | None = None) -> dict[str, float]:
+    """Features for one syllable clip (mono float, sr = config.SR).
+
+    ``band_hz`` = Chipper's (high-pass, low-pass) cutoffs for the bout: the clip is
+    assumed already band-pass filtered to it, and STFT bins outside it are zeroed so
+    every spectral statistic is computed inside Chipper's bounding box.
+    """
     if y.size < config.N_FFT:
         y = np.pad(y, (0, config.N_FFT - y.size))
     mag = np.abs(librosa.stft(y, n_fft=config.N_FFT, hop_length=config.HOP))
     freqs = librosa.fft_frequencies(sr=sr, n_fft=config.N_FFT)
+    if band_hz is not None:
+        lo, hi = band_hz
+        mag[(freqs < lo) | (freqs > hi), :] = 0.0
     rms = librosa.feature.rms(y=y, frame_length=config.N_FFT, hop_length=config.HOP)[0]
     centroid = librosa.feature.spectral_centroid(S=mag, sr=sr)[0]
     bandwidth = librosa.feature.spectral_bandwidth(S=mag, sr=sr)[0]

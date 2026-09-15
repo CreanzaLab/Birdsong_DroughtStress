@@ -12,6 +12,10 @@
 <header class="bar">
   <div class="row">
     <h1>Song Sparrow Syllable Atlas</h1>
+    <nav class="nav">
+      <button class="tab on" data-page="atlas">Atlas</button>
+      <button class="tab" data-page="glossary">Glossary</button>
+    </nav>
     <span id="status" class="label-caps">loading…</span>
     <div class="spacer"></div>
     <span class="label-caps">Hover</span>
@@ -44,6 +48,7 @@
 
 <main>
   <div id="plot"></div>
+  <section id="glossary" hidden></section>
   <aside id="detail" hidden>
     <div class="dhead"><span id="dname" class="mono"></span><button id="dclose" class="ghost">✕</button></div>
     <canvas id="dcanvas"></canvas>
