@@ -10,7 +10,7 @@ const DATA = '../atlas_data/';
 const $ = (id) => document.getElementById(id);
 
 const state = {
-  x: 'duration_ms', y: 'peak_frequency_hz', z: '', color: 'region', hover: 'syllable', play: 'off',
+  x: 'duration_ms', y: 'peak_frequency_hz', z: '', color: 'region', hover: 'syllable', play: 'off', view: 'axes',
   logx: false, logy: false, expr: '', pinned: null, hovered: null,
 };
 let meta, cols = {}, N = 0, bouts = {}, rowsById = {};
@@ -47,12 +47,18 @@ function buildControls() {
   const fillNumeric = (sel, allowEmpty) => {
     if (allowEmpty) sel.appendChild(opt('', '(2D)'));
     for (const g of meta.groups) {
+      if (/^Original 2022/.test(g.name)) continue;          // table values stay in the detail panel / filters, not as axes
       const og = document.createElement('optgroup'); og.label = g.name;
       g.columns.forEach((c) => og.appendChild(opt(c, prettyName(c))));
       sel.appendChild(og);
     }
   };
   fillNumeric($('x')); fillNumeric($('y')); fillNumeric($('z'), true);
+  for (const sel of [$('x'), $('y'), $('z')]) {
+    const og = document.createElement('optgroup'); og.label = 'PCA (computed on the current filter)';
+    ['pc1', 'pc2', 'pc3'].forEach((c) => og.appendChild(opt(c, c.toUpperCase())));
+    sel.appendChild(og);
+  }
   const cs = $('color');
   const ogc = document.createElement('optgroup'); ogc.label = 'Categories';
   meta.categorical.filter((c) => !['bout_key', 'qa_flags'].includes(c) || true).forEach((c) => ogc.appendChild(opt(c, prettyName(c))));
@@ -68,7 +74,11 @@ function buildControls() {
     vals.forEach((v) => sel.appendChild(opt(v)));
     sel.size = 1; sel.addEventListener('change', redraw);
   }
-  ['x', 'y', 'z', 'color'].forEach((k) => $(k).addEventListener('change', (e) => { state[k] = e.target.value; redraw(); }));
+  ['x', 'y', 'z', 'color'].forEach((k) => $(k).addEventListener('change', (e) => {
+    state[k] = e.target.value;
+    if (k !== 'color') state.view = [state.x, state.y, state.z].some((f) => /^pc\d$/.test(f || '')) ? 'pca' : 'axes';
+    redraw();
+  }));
   ['logx', 'logy'].forEach((k) => $(k).addEventListener('change', (e) => { state[k] = e.target.checked; redraw(); }));
   ['f_final', 'f_qa'].forEach((k) => $(k).addEventListener('change', redraw));
   $('expr').addEventListener('keydown', (e) => { if (e.key === 'Enter') { state.expr = e.target.value.trim(); redraw(); } });
@@ -86,10 +96,16 @@ function buildControls() {
   }));
   $('umapbtn').addEventListener('click', () => {
     if (!cols.umap_1) { alert('No UMAP columns in this build — run  python -m atlas.umap_map  then  python -m atlas.build --assemble-only'); return; }
-    state.x = 'umap_1'; state.y = 'umap_2'; state.z = ''; state.logx = state.logy = false;
-    $('x').value = 'umap_1'; $('y').value = 'umap_2'; $('z').value = ''; $('logx').checked = false; $('logy').checked = false;
-    redraw();
+    state.view = 'umap'; state.x = 'umap_1'; state.y = 'umap_2'; state.z = ''; state.logx = state.logy = false;
+    syncAxisControls(); redraw();
   });
+  $('pcabtn').addEventListener('click', () => {
+    state.view = state.view === 'pca' ? 'axes' : 'pca';
+    if (state.view === 'pca') { state.x = 'pc1'; state.y = 'pc2'; state.z = ''; state.logx = state.logy = false; }
+    else { state.x = 'duration_ms'; state.y = 'peak_frequency_hz'; state.z = ''; }
+    syncAxisControls(); redraw();
+  });
+  $('pca3d').addEventListener('click', () => { state.z = state.z === 'pc3' ? '' : 'pc3'; syncAxisControls(); redraw(); });
   $('dclose').addEventListener('click', unpin);
   $('dstop').addEventListener('click', stopAudio);
   $('dcanvas').addEventListener('click', (ev) => {          // click a syllable bar/region in the pinned song to switch to it
@@ -176,6 +192,7 @@ const GLOSSARY = [
       ['inputs', 'Only features that exist for every syllable: duration, Chipper upper/lower frequency, peak / mean / 5 % / 95 % frequencies, centroid, bandwidth, roll-off, flatness, flux, spectral / temporal / Wiener entropy, AM, pitch goodness, attack time, and the Viterbi median peak, bandwidth and filtered FM. Each is z-scored; duration, flux, Viterbi bandwidth and FM are log10-transformed first.'],
       ['not used', '2022-table values (missing for 230 bouts), pyin f0 (missing for short syllables), position in bout, recording metadata, latitude/longitude.'],
       ['parameters', 'umap-learn, n_neighbors 15, min_dist 0.1, euclidean, random_state 0.'],
+      ['PCA view', 'Principal components of the same z-scored inputs, computed in the browser on whatever subset is currently filtered (so it changes with the filters). Axis titles give the variance explained; the side panel shows the 15 features with the largest PC1 loadings.'],
     ] },
   { title: 'Position in bout', terms: [
       ['syll_num / n_sylls_in_bout / rel_position', 'Order in the song, song length in syllables, and (k−1)/(n−1).'],
@@ -213,6 +230,8 @@ function showPage(pg) {
 document.querySelectorAll('[data-page]').forEach((b) => b.addEventListener('click', () => showPage(b.dataset.page)));
 
 function prettyName(c) {
+  const m = /^pc(\d)$/.exec(c || '');
+  if (m && pca) return `PC${m[1]} (${(pca.ev[+m[1] - 1] * 100).toFixed(0)}% of variance)`;
   return c.replace(/_hz$/, ' (Hz)').replace(/_ms$/, ' (ms)').replace(/_/g, ' ');
 }
 
@@ -297,10 +316,74 @@ function layout(dims) {
     : { ...base, xaxis: ax(prettyName(state.x), state.logx), yaxis: ax(prettyName(state.y), state.logy) };
 }
 
-let tweenRaf = 0;
+let tweenRaf = 0, lastDims = 0;
+function syncAxisControls() {
+  $('x').value = state.x; $('y').value = state.y; $('z').value = state.z; $('logx').checked = state.logx; $('logy').checked = state.logy;
+}
+
+/* ------------------------------------------------------------------ PCA (in-browser, on the filtered subset, same inputs as UMAP) */
+let pca = null;   // { n, ev: [..], loadings: [{feature, pc1, pc2, pc3}] }
+function jacobiEigen(Ain) {           // symmetric eigen-decomposition (Jacobi rotations); returns {values, vectors(cols)}
+  const n = Ain.length, A = Ain.map((r) => r.slice()), V = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)));
+  for (let sweep = 0; sweep < 100; sweep++) {
+    let off = 0;
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) off += A[i][j] * A[i][j];
+    if (off < 1e-14) break;
+    for (let p = 0; p < n; p++) for (let q = p + 1; q < n; q++) {
+      if (Math.abs(A[p][q]) < 1e-15) continue;
+      const th = 0.5 * Math.atan2(2 * A[p][q], A[q][q] - A[p][p]), c = Math.cos(th), sn = Math.sin(th);
+      for (let k = 0; k < n; k++) { const akp = A[k][p], akq = A[k][q]; A[k][p] = c * akp - sn * akq; A[k][q] = sn * akp + c * akq; }
+      for (let k = 0; k < n; k++) { const apk = A[p][k], aqk = A[q][k]; A[p][k] = c * apk - sn * aqk; A[q][k] = sn * apk + c * aqk; }
+      for (let k = 0; k < n; k++) { const vkp = V[k][p], vkq = V[k][q]; V[k][p] = c * vkp - sn * vkq; V[k][q] = sn * vkp + c * vkq; }
+    }
+  }
+  const order = [...Array(n).keys()].sort((a, b) => A[b][b] - A[a][a]);
+  return { values: order.map((i) => A[i][i]), vectors: order.map((i) => V.map((row) => row[i])) };
+}
+function computePCA(idx) {
+  const u = meta.umap, feats = u ? u.features : [], logs = new Set(u ? u.log10_transformed : []);
+  const offs = { duration_ms: 0, spectral_flux_mean: 1e-6, vit_peak_bandwidth_hz: 1, vit_fm_filtered_khz_s: 1 };
+  const rows = idx.filter((i) => feats.every((f) => cols[f][i] != null && Number.isFinite(+cols[f][i])));
+  const m = feats.length, n = rows.length;
+  if (n < m + 2) { pca = null; return; }
+  const X = rows.map((i) => feats.map((f) => (logs.has(f) ? Math.log10(+cols[f][i] + (offs[f] ?? 0)) : +cols[f][i])));
+  const mean = feats.map((_, j) => X.reduce((a, r) => a + r[j], 0) / n);
+  const sd = feats.map((_, j) => Math.sqrt(X.reduce((a, r) => a + (r[j] - mean[j]) ** 2, 0) / n) || 1);
+  for (const r of X) for (let j = 0; j < m; j++) r[j] = (r[j] - mean[j]) / sd[j];
+  const C = Array.from({ length: m }, () => new Array(m).fill(0));
+  for (const r of X) for (let a = 0; a < m; a++) for (let b = a; b < m; b++) C[a][b] += r[a] * r[b];
+  for (let a = 0; a < m; a++) for (let b = a; b < m; b++) { C[a][b] /= n - 1; C[b][a] = C[a][b]; }
+  const { values, vectors } = jacobiEigen(C), tot = values.reduce((a, v) => a + v, 0);
+  ['pc1', 'pc2', 'pc3'].forEach((c, k) => { cols[c] = new Array(N).fill(null); rows.forEach((i, r) => { cols[c][i] = X[r].reduce((a, v, j) => a + v * vectors[k][j], 0); }); });
+  pca = { n, ev: values.slice(0, 3).map((v) => v / tot), loadings: feats.map((f, j) => ({ feature: f, pc1: vectors[0][j], pc2: vectors[1][j], pc3: vectors[2][j] })) };
+}
+function drawLoadings() {
+  const box = $('loadings');
+  if (state.view !== 'pca' || !pca) { box.hidden = true; return; }
+  box.hidden = false;
+  const top = [...pca.loadings].sort((a, b) => Math.abs(b.pc1) - Math.abs(a.pc1)).slice(0, 15).reverse();
+  const traces = [
+    { type: 'bar', orientation: 'h', name: 'PC1', x: top.map((l) => l.pc1), y: top.map((l) => l.feature), marker: { color: '#b08527' } },
+    { type: 'bar', orientation: 'h', name: 'PC2', x: top.map((l) => l.pc2), y: top.map((l) => l.feature), marker: { color: '#2f6b6b' } },
+  ];
+  if (state.z === 'pc3') traces.push({ type: 'bar', orientation: 'h', name: 'PC3', x: top.map((l) => l.pc3), y: top.map((l) => l.feature), marker: { color: '#9a4f3f' } });
+  Plotly.react($('loadplot'), traces, { barmode: 'group', margin: { l: 150, r: 10, t: 4, b: 24 }, height: 26 * top.length + 60, width: 330, showlegend: true,
+    legend: { font: { size: 10 }, orientation: 'h', y: 1.06 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+    font: { family: 'Inter, system-ui', color: '#4a4640', size: 10 }, xaxis: { gridcolor: '#e0d5bd', zerolinecolor: '#ddd2bb' }, yaxis: { automargin: true } },
+    { displaylogo: false, displayModeBar: false, responsive: false });
+}
+
 function updateUmapNote() {
   const n = $('umapnote'), u = meta.umap, on = [state.x, state.y, state.z].some((f) => /^umap/.test(f || ''));
   $('umapbtn').classList.toggle('on', on);
+  $('pcabtn').classList.toggle('on', state.view === 'pca'); $('pca3d').hidden = state.view !== 'pca'; $('pca3d').classList.toggle('on', state.z === 'pc3');
+  if (state.view === 'pca' && u) {
+    n.hidden = false;
+    const ev = pca ? pca.ev.map((v) => (v * 100).toFixed(0) + '%').join(' / ') : '…';
+    n.innerHTML = `<b>PCA</b> of the ${pca ? pca.n.toLocaleString() : '…'} currently filtered syllables · variance explained PC1 / PC2 / PC3: ${ev} · same ${u.features.length} z-scored inputs as the UMAP` +
+      ` (log10 first: ${u.log10_transformed.join(', ')}). <b>Inputs:</b> ${u.features.join(', ')}. <b>Not used:</b> ${u.excluded_on_purpose}. Recomputed whenever the filter changes.`;
+    return;
+  }
   if (!on || !u) { n.hidden = true; return; }
   n.hidden = false;
   n.innerHTML = `<b>UMAP</b> of ${u.n_syllables.toLocaleString()} syllables · ${u.features.length} acoustic features, each z-scored` +
@@ -308,8 +391,9 @@ function updateUmapNote() {
     ` <b>Inputs:</b> ${u.features.join(', ')}. <b>Not used:</b> ${u.excluded_on_purpose}.`;
 }
 function redraw() {
-  updateUmapNote();
   let [idx, err] = applyFilters();
+  if (state.view === 'pca' || [state.x, state.y, state.z].some((f) => /^pc\d$/.test(f || ''))) computePCA(idx);
+  updateUmapNote(); drawLoadings();
   const dims3 = !!state.z, MAX_3D = 8000;
   let note = '';
   if (dims3 && idx.length > MAX_3D) {           // scatter3d + per-hover updates freeze past ~10k points
@@ -324,6 +408,8 @@ function redraw() {
   $('status').textContent = `${n.toLocaleString()} of ${N.toLocaleString()} syllables` + note + (err ? `  ·  filter error: ${err}` : '');
   const cfg = { displaylogo: false, scrollZoom: true, responsive: true, modeBarButtonsToRemove: ['lasso2d', 'select2d'] };
   cancelAnimationFrame(tweenRaf);
+  if (dims !== lastDims && gd.data) { Plotly.purge(gd); bound = false; }   // a stale WebGL scene otherwise survives the switch
+  lastDims = dims;
   if (sig !== drawnSig || !gd.data || dims === 3) {
     drawnSig = sig;
     Plotly.react(gd, traces, layout(dims), cfg);
@@ -357,14 +443,18 @@ function bindPlotEvents() {
   gd.on('plotly_click', (e) => { const p = e.points?.[0]; if (p && p.curveNumber < nDataTraces) pin(p.customdata); });
   document.addEventListener('mousemove', (ev) => { mouse.x = ev.clientX; mouse.y = ev.clientY; });
   gd.addEventListener('mouseleave', onUnhover);
-  gd.addEventListener('mousedown', () => { dragging = true; onUnhover(); }, true);
-  window.addEventListener('mouseup', () => { dragging = false; }, true);
+  gd.addEventListener('mousedown', () => { dragging = true; hideOverlayOnly(); }, true);
+  window.addEventListener('mouseup', () => { dragging = false; if (clearAfterDrag) { clearAfterDrag = false; onUnhover(); } }, true);
+  gd.addEventListener('wheel', () => { lastWheel = performance.now(); hideOverlayOnly(); }, { passive: true, capture: true });
   const fit = () => { if (gd.data && !gd.hidden && gd.clientWidth > 0 && gd.clientHeight > 0) Plotly.relayout(gd, { width: gd.clientWidth, height: gd.clientHeight }); };
   window.addEventListener('resize', fit);
   new ResizeObserver(fit).observe(gd);   // also fires when the detail panel opens/closes
 }
 const mouse = { x: 0, y: 0 };
 let dragging = false;   // Plotly cancels a pan if we restyle mid-drag, so hover is ignored while the button is down
+let lastWheel = 0;      // ...and scroll-zoom is left alone for a moment after each wheel tick
+let clearAfterDrag = false;
+const interacting = () => dragging || performance.now() - lastWheel < 400;
 
 /* ------------------------------------------------------------------ path + highlight */
 function setPath(i) {
@@ -386,8 +476,12 @@ function setHighlight(i) {
 
 /* ------------------------------------------------------------------ hover */
 let lastHover = null;
+function hideOverlayOnly() {          // DOM-only: safe to call mid-drag (no Plotly restyle)
+  $('overlay').hidden = true; stopAudio(); lastHover = null; state.hovered = null;
+  if (state.pinned == null) clearAfterDrag = true;
+}
 function onHover(i) {
-  if (dragging || i === lastHover) return;
+  if (interacting() || i === lastHover) return;
   lastHover = i; state.hovered = i;
   const ov = $('overlay');
   drawSyllable($('ocanvas'), i, state.hover === 'bout' ? 'bout' : 'syllable', state.hover === 'bout' ? 560 : 260).then(() => {
@@ -403,7 +497,7 @@ function onHover(i) {
   if (state.play !== 'off') playRow(i, state.play);
 }
 function onUnhover() {
-  if (dragging && lastHover == null) return;
+  if (interacting()) { hideOverlayOnly(); return; }
   lastHover = null; state.hovered = null;
   $('overlay').hidden = true;
   stopAudio();

@@ -108,12 +108,20 @@ and `bouts.json` (what the web app loads), `meta.json` (field groups + docs).
 
 - **Atlas / Glossary** tabs: the glossary explains every axis, colour, flag and how
   the boundaries were derived.
-- **Axes**: X / Y / optional Z (3-D) from any numeric feature; log toggles. 3-D shows
+- **Axes**: X / Y / optional Z (3-D) from any computed numeric feature; log toggles.
+  The "Original 2022 analysis" table values are not offered as axes (they exist for
+  only 1,575 bouts) but remain in the detail panel and in filter expressions. 3-D shows
   an evenly spaced subsample of 8 000 points (scatter3d cannot re-render tens of
   thousands of points on every hover).
 - **Color**: any categorical field (grouped legend, click to isolate) or numeric
   feature (continuous scale).
 - **UMAP view** button: sets X/Y to the UMAP projection and shows the input banner.
+- **PCA view** button (like the Sound Atlas PCA page): principal components of the
+  same 21 z-scored inputs as the UMAP, computed in the browser on the currently
+  filtered syllables and recomputed when the filter changes. Axis titles carry the
+  variance explained, a side panel shows the 15 largest PC1 loadings (PC1/PC2/PC3
+  bars), and "PC1–3" puts PC3 on the Z axis. `pc1`–`pc3` are also selectable directly
+  in the axis dropdowns.
 - **Filters**: region / era / source multi-selects, "only bouts in the 2022
   analysis", "hide QA-flagged bouts", and a free expression such as
   `duration_ms > 100 && cluster_2022 == '1978'`.

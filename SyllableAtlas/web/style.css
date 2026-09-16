@@ -60,3 +60,5 @@ body.page-glossary .row:not(:first-child) { display: none; }
 .note[hidden] { display: none; }
 .note b { color: var(--ink); }
 #dcanvas { cursor: pointer; }
+#loadings { width: 340px; border-left: 1px solid var(--line); background: var(--parchment-50); overflow: auto; }
+#loadings[hidden] { display: none; }
