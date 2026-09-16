@@ -444,7 +444,15 @@ function bindPlotEvents() {
   document.addEventListener('mousemove', (ev) => { mouse.x = ev.clientX; mouse.y = ev.clientY; });
   gd.addEventListener('mouseleave', onUnhover);
   gd.addEventListener('mousedown', () => { dragging = true; hideOverlayOnly(); }, true);
-  window.addEventListener('mouseup', () => { dragging = false; if (clearAfterDrag) { clearAfterDrag = false; onUnhover(); } }, true);
+  // Plotly emits plotly_click from its own mouseup handler using the current hover data; a restyle before that
+  // (we run in the capture phase) wipes it and the click is lost. So finish the drag now, but clear the
+  // highlight/path in a later task, and only if the click did not pin anything.
+  window.addEventListener('mouseup', () => {
+    dragging = false;
+    if (!clearAfterDrag) return;
+    clearAfterDrag = false;
+    setTimeout(() => { if (state.pinned == null && lastHover == null) { setPath(null); setHighlight(null); } }, 0);
+  }, true);
   gd.addEventListener('wheel', () => { lastWheel = performance.now(); hideOverlayOnly(); }, { passive: true, capture: true });
   const fit = () => { if (gd.data && !gd.hidden && gd.clientWidth > 0 && gd.clientHeight > 0) Plotly.relayout(gd, { width: gd.clientWidth, height: gd.clientHeight }); };
   window.addEventListener('resize', fit);
