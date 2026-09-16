@@ -223,7 +223,7 @@ function renderGlossary() {
 function showPage(pg) {
   document.querySelectorAll('[data-page]').forEach((b) => b.classList.toggle('on', b.dataset.page === pg));
   document.body.classList.toggle('page-glossary', pg === 'glossary');
-  $('plot').hidden = pg !== 'atlas'; $('glossary').hidden = pg !== 'glossary';
+  $('plotwrap').hidden = pg !== 'atlas'; $('glossary').hidden = pg !== 'glossary';
   if (pg === 'glossary') { renderGlossary(); if (state.pinned == null) $('detail').hidden = true; }
   else { if (state.pinned != null) $('detail').hidden = false; if (gd.data) Plotly.relayout(gd, { width: gd.clientWidth, height: gd.clientHeight }); }
 }
@@ -298,7 +298,7 @@ function buildTraces(idx) {
   nDataTraces = traces.length;
   // bout-path trace + highlight trace (kept empty until a hover)
   traces.push({ type: t, mode: 'lines+markers', name: 'bout path', showlegend: false, hoverinfo: 'skip', x: [], y: [], ...(dims === 3 ? { z: [] } : {}),
-    line: { color: '#1b1a17', width: 1.5 }, marker: { size: 7, color: '#ffffff', line: { color: '#1b1a17', width: 1.5 } }, text: [], textposition: 'top center', textfont: { size: 9 } });
+    line: { color: '#ffffff', width: 4 }, marker: { size: 9, color: '#ffffff', line: { color: '#1b1a17', width: 2 } }, text: [], textposition: 'top center', textfont: { size: 10, color: '#1b1a17' } });
   traces.push({ type: t, mode: 'markers', name: 'hovered', showlegend: false, hoverinfo: 'skip', x: [], y: [], ...(dims === 3 ? { z: [] } : {}),
     marker: { size: 13, color: 'rgba(0,0,0,0)', line: { color: '#b08527', width: 2.5 } } });
   return [traces, keep.length];
@@ -408,7 +408,7 @@ function redraw() {
   $('status').textContent = `${n.toLocaleString()} of ${N.toLocaleString()} syllables` + note + (err ? `  ·  filter error: ${err}` : '');
   const cfg = { displaylogo: false, scrollZoom: true, responsive: true, modeBarButtonsToRemove: ['lasso2d', 'select2d'] };
   cancelAnimationFrame(tweenRaf);
-  if (dims !== lastDims && gd.data) { Plotly.purge(gd); bound = false; }   // a stale WebGL scene otherwise survives the switch
+  if (dims !== lastDims && gd.data) { Plotly.purge(gd); bound = false; pathState.rows = null; pathState.hl = null; drawPathOverlay(); }   // a stale WebGL scene otherwise survives the switch
   lastDims = dims;
   if (sig !== drawnSig || !gd.data || dims === 3) {
     drawnSig = sig;
@@ -427,7 +427,7 @@ function redraw() {
         upd.y.push(starts[k].y.map((v, i) => v + (traces[k].y[i] - v) * e));
       }
       Plotly.restyle(gd, upd, [...Array(nDataTraces).keys()]);
-      if (u < 1) tweenRaf = requestAnimationFrame(step); else Plotly.relayout(gd, { 'xaxis.autorange': true, 'yaxis.autorange': true });
+      if (u < 1) tweenRaf = requestAnimationFrame(step); else Plotly.relayout(gd, { 'xaxis.autorange': true, 'yaxis.autorange': true }).then(drawPathOverlay);
     };
     Plotly.relayout(gd, { 'xaxis.autorange': true, 'yaxis.autorange': true });
     tweenRaf = requestAnimationFrame(step);
@@ -441,6 +441,9 @@ function bindPlotEvents() {
   gd.on('plotly_hover', (e) => { const p = e.points?.[0]; if (p && p.curveNumber < nDataTraces) onHover(p.customdata); });
   gd.on('plotly_unhover', () => onUnhover());
   gd.on('plotly_click', (e) => { const p = e.points?.[0]; if (p && p.curveNumber < nDataTraces) pin(p.customdata); });
+  gd.on('plotly_relayout', drawPathOverlay);
+  gd.on('plotly_relayouting', drawPathOverlay);
+  gd.on('plotly_afterplot', drawPathOverlay);
   document.addEventListener('mousemove', (ev) => { mouse.x = ev.clientX; mouse.y = ev.clientY; });
   gd.addEventListener('mouseleave', onUnhover);
   gd.addEventListener('mousedown', () => { dragging = true; hideOverlayOnly(); }, true);
@@ -464,22 +467,64 @@ let lastWheel = 0;      // ...and scroll-zoom is left alone for a moment after e
 let clearAfterDrag = false;
 const interacting = () => dragging || performance.now() - lastWheel < 400;
 
-/* ------------------------------------------------------------------ path + highlight */
+/* ------------------------------------------------------------------ path + highlight
+   In 2-D the bout path and the highlighted syllable are drawn in an SVG overlay positioned over the plot, so a hover
+   never restyles Plotly (a scattergl restyle re-renders all ~27k points and a fast mouse used to pile those up
+   into a freeze). The overlay is redrawn on pan/zoom/resize. In 3-D the path falls back to a Plotly trace. */
+const pathState = { rows: null, hl: null };
+const svgNS = 'http://www.w3.org/2000/svg';
+function pixelOf(i) {
+  const fl = gd._fullLayout, xa = fl.xaxis, ya = fl.yaxis;
+  const x = xa._offset + xa.d2p(axisVal(state.x, i)), y = ya._offset + ya.d2p(axisVal(state.y, i));
+  return Number.isFinite(x) && Number.isFinite(y) ? [x, y] : null;
+}
+function drawPathOverlay() {
+  const svg = $('pathsvg');
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  if (!gd._fullLayout || !gd._fullLayout.xaxis || state.z) return;      // 3-D handled by traces
+  const fl = gd._fullLayout, xa = fl.xaxis, ya = fl.yaxis;
+  // clip to the plotting area so panned-out syllables don't draw over the axes
+  const defs = document.createElementNS(svgNS, 'defs'), cp = document.createElementNS(svgNS, 'clipPath'); cp.id = 'plotclip';
+  const rect = document.createElementNS(svgNS, 'rect');
+  rect.setAttribute('x', xa._offset); rect.setAttribute('y', ya._offset); rect.setAttribute('width', xa._length); rect.setAttribute('height', ya._length);
+  cp.appendChild(rect); defs.appendChild(cp); svg.appendChild(defs);
+  const g = document.createElementNS(svgNS, 'g'); g.setAttribute('clip-path', 'url(#plotclip)'); svg.appendChild(g);
+  const mk = (tag, attrs, parent = g) => { const el = document.createElementNS(svgNS, tag); for (const k in attrs) el.setAttribute(k, attrs[k]); parent.appendChild(el); return el; };
+  const rows = pathState.rows || [];
+  const pts = rows.map((r) => [r, pixelOf(r)]).filter((p) => p[1]);
+  if (pts.length > 1) {
+    const d = pts.map(([, p], k) => (k ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+    mk('path', { d, fill: 'none', stroke: '#1b1a17', 'stroke-width': 4.5, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', opacity: 0.9 });
+    mk('path', { d, fill: 'none', stroke: '#ffffff', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' });
+  }
+  for (const [r, p] of pts) {
+    const hl = r === pathState.hl, n = String(cols.syll_num[r]), rad = hl ? 12 : 10;
+    mk('circle', { cx: p[0], cy: p[1], r: rad, fill: hl ? '#b08527' : '#ffffff', stroke: '#1b1a17', 'stroke-width': hl ? 2 : 1.5 });
+    const t = mk('text', { x: p[0], y: p[1], 'text-anchor': 'middle', 'dominant-baseline': 'central', 'font-size': n.length > 2 ? 8 : 10, 'font-weight': 600,
+      'font-family': 'Inter, system-ui, sans-serif', fill: hl ? '#ffffff' : '#1b1a17' });
+    t.textContent = n;
+  }
+  if (pathState.hl != null && !rows.includes(pathState.hl)) {           // highlight alone (syllable hover mode)
+    const p = pixelOf(pathState.hl);
+    if (p) mk('circle', { cx: p[0], cy: p[1], r: 9, fill: 'none', stroke: '#b08527', 'stroke-width': 3 });
+  }
+}
 function setPath(i) {
-  const pi = nDataTraces, dims = state.z ? 3 : 2;
-  if (i == null) { Plotly.restyle(gd, { x: [[]], y: [[]], ...(dims === 3 ? { z: [[]] } : {}), text: [[]] }, [pi]); return; }
-  const rows = bouts._rows[cols.bout_key[i]].filter((r) => Number.isFinite(axisVal(state.x, r)) && Number.isFinite(axisVal(state.y, r)));
-  Plotly.restyle(gd, {
-    x: [rows.map((r) => axisVal(state.x, r))], y: [rows.map((r) => axisVal(state.y, r))],
-    ...(dims === 3 ? { z: [rows.map((r) => axisVal(state.z, r))] } : {}),
-    text: [rows.map((r) => String(cols.syll_num[r]))], mode: rows.length > 40 ? 'lines+markers' : 'lines+markers+text',
-  }, [pi]);
+  if (state.z) {                                                         // 3-D: Plotly trace
+    const pi = nDataTraces;
+    if (i == null) { Plotly.restyle(gd, { x: [[]], y: [[]], z: [[]], text: [[]] }, [pi]); return; }
+    const rows = bouts._rows[cols.bout_key[i]].filter((r) => Number.isFinite(axisVal(state.x, r)) && Number.isFinite(axisVal(state.y, r)) && Number.isFinite(axisVal(state.z, r)));
+    Plotly.restyle(gd, { x: [rows.map((r) => axisVal(state.x, r))], y: [rows.map((r) => axisVal(state.y, r))], z: [rows.map((r) => axisVal(state.z, r))],
+      text: [rows.map((r) => String(cols.syll_num[r]))], mode: 'lines+markers+text' }, [pi]);
+    return;
+  }
+  pathState.rows = i == null ? null : bouts._rows[cols.bout_key[i]];
+  drawPathOverlay();
 }
 function setHighlight(i) {
-  const hi = nDataTraces + 1, dims = state.z ? 3 : 2;
-  if (dims === 3) return;   // every scatter3d restyle re-uploads the whole scene; the hover overlay is enough in 3D
-  if (i == null) { Plotly.restyle(gd, { x: [[]], y: [[]], ...(dims === 3 ? { z: [[]] } : {}) }, [hi]); return; }
-  Plotly.restyle(gd, { x: [[axisVal(state.x, i)]], y: [[axisVal(state.y, i)]], ...(dims === 3 ? { z: [[axisVal(state.z, i)]] } : {}) }, [hi]);
+  if (state.z) return;                                                   // 3-D: the hover card is enough
+  pathState.hl = i;
+  drawPathOverlay();
 }
 
 /* ------------------------------------------------------------------ hover */
