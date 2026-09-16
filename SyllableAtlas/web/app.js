@@ -135,6 +135,7 @@ const GLOSSARY = [
     terms: [
       ['syllable', 'A Chipper onset→offset unit inside a bout. Names read "recording bout n · syll k/n".'],
       ['bout', 'One song extracted from a longer recording (the wav Chipper was run on).'],
+      ['Chipper sonogram', 'The strip under each spectrogram is Chipper\'s own thresholded sonogram from the gzip (black = pixels Chipper kept as signal after its frequency filter and thresholding), cropped to the same time span and 0–10 kHz. It is the matrix the onsets/offsets and the Chipper frequency bounds were computed from, so it shows exactly what Chipper "saw".'],
       ['bout path', 'The polyline through all syllables of the hovered syllable\'s bout, in the current X/Y(/Z) axes.'],
       ['QA flags', 'Per-bout alignment checks (see below). Flagged bouts are hidden by default; untick "hide QA-flagged bouts" to show them.'],
     ] },
@@ -639,41 +640,62 @@ function unpin() { state.pinned = null; $('detail').hidden = true; setPath(null)
 
 /* ------------------------------------------------------------------ spectrogram drawing (crop from the bout PNG) */
 const imgCache = new Map();
-function loadImg(b) {
-  if (imgCache.has(b.bout_key)) return imgCache.get(b.bout_key);
-  const p = new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = DATA + b.png; });
-  imgCache.set(b.bout_key, p); return p;
+function loadImg(b, which = 'png') {
+  const key = b.bout_key + '|' + which;
+  if (imgCache.has(key)) return imgCache.get(key);
+  const p = new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = DATA + b[which]; });
+  imgCache.set(key, p);
+  if (imgCache.size > 400) imgCache.delete(imgCache.keys().next().value);
+  return p;
 }
 async function drawSyllable(canvas, i, mode, targetW, allBars = false) {
-  const b = bouts[cols.bout_key[i]], im = await loadImg(b);
+  const b = bouts[cols.bout_key[i]];
+  const [im, chip] = await Promise.all([loadImg(b, 'png'), b.png_chipper ? loadImg(b, 'png_chipper') : Promise.resolve(null)]);
+  if (!im) return;
   const ppm = b.px_per_ms, on = cols.onset_ms[i], off = cols.offset_ms[i];
   const pad = mode === 'syllable' ? Math.max(15, (off - on) * 0.25) : 0;              // ms of context around a syllable
   const t0 = mode === 'syllable' ? Math.max(0, on - pad) : 0, t1 = mode === 'syllable' ? Math.min(b.duration_ms, off + pad) : b.duration_ms;
   const sx = t0 * ppm, sw = (t1 - t0) * ppm;
-  const L = 26, B = 22, H = 150, W = Math.max(60, Math.min(targetW, Math.round(sw * (H / im.height))));
-  canvas.width = W + L; canvas.height = H + B + 12;
+  // layout: audio spectrogram (H) above, Chipper's thresholded sonogram (HC) below, same time crop
+  const L = 26, B = 22, H = 130, HC = chip ? 70 : 0, GAP = chip ? 6 : 0;
+  const W = Math.max(60, Math.min(targetW, Math.round(sw * ((H + HC) / (im.height * (chip ? 1.55 : 1))))));
+  canvas.width = W + L; canvas.height = H + GAP + HC + B + 12;
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(im, sx, 0, sw, im.height, L, 0, W, H);
+  const yC = H + GAP;                                                                   // top of the Chipper strip
+  if (chip) {
+    ctx.fillStyle = '#faf7ef'; ctx.fillRect(L, yC, W, HC);
+    ctx.drawImage(chip, sx, 0, sw, chip.height, L, yC, W, HC);
+    ctx.strokeStyle = '#ddd2bb'; ctx.lineWidth = 1; ctx.strokeRect(L + 0.5, yC + 0.5, W - 1, HC - 1);
+  }
   const xOf = (ms) => L + ((ms - t0) / (t1 - t0)) * W;
   canvas.dataset.xof = JSON.stringify({ L, W, t0, t1 });   // lets the detail panel map a click back to time
   // syllable bars along the bottom: the selected one solid brass, the others faint
-  const y0 = H + 3;
+  const y0 = yC + HC + 3;
   if (allBars || mode === 'bout') {
     ctx.fillStyle = 'rgba(176,133,39,.3)';
     b.onsets_ms.forEach((a, k) => { if (k !== cols.syll_num[i] - 1) ctx.fillRect(xOf(a), y0, Math.max(1, xOf(b.offsets_ms[k]) - xOf(a)), 5); });
   }
   ctx.fillStyle = '#b08527'; ctx.fillRect(xOf(on), y0, Math.max(2, xOf(off) - xOf(on)), 5);
-  if (mode === 'syllable') { ctx.strokeStyle = 'rgba(176,133,39,.55)'; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(xOf(on), 0); ctx.lineTo(xOf(on), H); ctx.moveTo(xOf(off), 0); ctx.lineTo(xOf(off), H); ctx.stroke(); ctx.setLineDash([]); }
-  // axes: kHz ticks (left), ms ticks (bottom)
+  if (mode === 'syllable') {
+    ctx.strokeStyle = 'rgba(176,133,39,.55)'; ctx.setLineDash([3, 3]); ctx.beginPath();
+    for (const ms of [on, off]) { ctx.moveTo(xOf(ms), 0); ctx.lineTo(xOf(ms), yC + HC); }
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+  // axes: kHz ticks (left, both panels), ms ticks (bottom)
   ctx.fillStyle = '#6b6657'; ctx.font = '9px Inter, system-ui'; ctx.textAlign = 'right';
   for (let k = 0; k <= b.fmax_hz / 1000; k += 2) ctx.fillText(k + (k === 0 ? ' kHz' : ''), L - 3, H - (k * 1000 / b.fmax_hz) * H + 3);
+  if (chip) {
+    for (const k of [0, 5, 10]) if (k * 1000 <= b.fmax_hz) ctx.fillText(String(k), L - 3, yC + HC - (k * 1000 / b.fmax_hz) * HC + 3);
+    ctx.save(); ctx.translate(L + 3, yC + 9); ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(107,102,87,.85)'; ctx.font = '8px Inter, system-ui'; ctx.fillText('Chipper sonogram', 0, 0); ctx.restore();
+  }
   ctx.textAlign = 'center';
   const span = t1 - t0, pxPerMs = W / span;
   const stepMs = [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000].find((s) => s * pxPerMs >= 48) || 2000;   // labels >= 48 px apart
   const first = Math.ceil(t0 / stepMs) * stepMs;
-  for (let ms = first; ms <= t1; ms += stepMs) ctx.fillText(Math.round(ms) + (ms === first ? ' ms' : ''), xOf(ms), H + B + 6);
-  if (mode === 'bout') { ctx.textAlign = 'left'; ctx.fillStyle = '#b08527'; ctx.fillText(`syll ${cols.syll_num[i]} of ${b.n_sylls}`, xOf(on), H + 20); }
+  for (let ms = first; ms <= t1; ms += stepMs) ctx.fillText(Math.round(ms) + (ms === first ? ' ms' : ''), xOf(ms), yC + HC + B + 6);
+  if (mode === 'bout') { ctx.textAlign = 'left'; ctx.fillStyle = '#b08527'; ctx.fillText(`syll ${cols.syll_num[i]} of ${b.n_sylls}`, xOf(on), yC + HC + 20); }
 }
 
 /* ------------------------------------------------------------------ audio (Web Audio; one decoded buffer per bout, play a sub-range) */

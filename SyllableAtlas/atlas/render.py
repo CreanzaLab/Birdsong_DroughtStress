@@ -27,3 +27,22 @@ def render_bout(y: np.ndarray, sr: int, path: Path | str) -> tuple[int, int]:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     im.save(path, optimize=True)
     return im.size
+
+
+def render_chipper(sono: np.ndarray, ms_per_px: float, hz_per_px: float, shift_ms: float, dur_ms: float,
+                   out_width: int, path: Path | str) -> tuple[int, int]:
+    """Chipper's thresholded sonogram (rows: 0 = highest frequency; 1 = signal kept) rendered to
+    the SAME pixel geometry as the audio spectrogram: columns cropped to the audio's time span
+    (Chipper's padding removed via ``shift_ms``), rows cropped to 0..RENDER_FMAX, resized to
+    ``out_width`` x IMG_HEIGHT. Signal is black on white."""
+    n_rows, n_cols = sono.shape
+    c0 = int(round(-shift_ms / ms_per_px))                       # shift_ms is negative: audio starts pad/2 into the sonogram
+    c1 = int(round((dur_ms - shift_ms) / ms_per_px))
+    c0, c1 = max(0, c0), min(n_cols, max(c0 + 1, c1))
+    r0 = max(0, n_rows - int(np.ceil(config.RENDER_FMAX / hz_per_px)))
+    crop = sono[r0:, c0:c1]
+    img = ((1 - crop.astype(np.float32)) * 255).astype(np.uint8)
+    im = Image.fromarray(img, mode="L").resize((max(1, out_width), config.IMG_HEIGHT), Image.BILINEAR)
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    im.save(path, optimize=True)
+    return im.size

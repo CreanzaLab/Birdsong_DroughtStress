@@ -64,7 +64,10 @@ For each `SegSyllsOutput_<rec>_bout<n>.gzip` with a matching wav:
    unfiltered.
 5. **Assets** — the bout is resampled to 44.1 kHz and written as a 16-bit wav; a
    greyscale spectrogram PNG (1 px per 128-sample frame, 0–10 kHz, no margins) is
-   rendered once per bout. The browser crops syllables out of the bout image and
+   rendered once per bout, plus `<bout>_chipper.png`: Chipper's own thresholded
+   sonogram from the gzip, cropped to the audio's time span (padding removed) and to
+   0–10 kHz and resized to the same pixel geometry, so the app can show it under the
+   spectrogram with the same syllable crop. The browser crops syllables out of the bout image and
    plays sub-ranges of the bout audio, so there are no per-syllable files.
 6. **Features** per syllable (`atlas/features.py`, `atlas/viterbi.py`; MFCCs, spectral-contrast bands
    and the harmonic HNR/inharmonicity measures are deliberately excluded):
@@ -128,7 +131,7 @@ and `bouts.json` (what the web app loads), `meta.json` (field groups + docs).
   analysis", "hide QA-flagged bouts", and a free expression such as
   `duration_ms > 100 && cluster_2022 == '1978'`.
 - **Hover** → `syllable`: the syllable's spectrogram (with a little context, dashed
-  onset/offset). `bout path`: the whole song with the hovered syllable's bar
+  onset/offset) with Chipper's thresholded sonogram strip beneath it. `bout path`: the whole song with the hovered syllable's bar
   highlighted, and the path through the song's syllables drawn on the plot.
 - **Play** → `off` / `syllable` / `whole song` on hover.
 - **Click** a point to pin it: detail panel with the full song, all syllable bars,

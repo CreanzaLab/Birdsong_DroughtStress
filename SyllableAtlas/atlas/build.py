@@ -106,7 +106,7 @@ def process_bout(job):
     import librosa
     import soundfile as sf
     from . import features as F
-    from .render import px_per_ms, render_bout
+    from .render import px_per_ms, render_bout, render_chipper
 
     rec, key = norm_key(gz_name)
     cache = config.CACHE_DIR / f"{key}.json"
@@ -135,6 +135,8 @@ def process_bout(job):
 
         sf.write(str(config.AUDIO_DIR / f"{key}.wav"), y, config.SR, subtype="PCM_16")
         w, h = render_bout(y, config.SR, config.IMG_DIR / f"{key}.png")
+        render_chipper(bout.sonogram, bout.ms_per_px, bout.hz_per_px, al.shift_ms, y.size / config.SR * 1000,
+                       w, config.IMG_DIR / f"{key}_chipper.png")
 
         up_hz, lo_hz = bout.syll_freq_bounds()
         dur_ms = y.size / config.SR * 1000
@@ -159,7 +161,7 @@ def process_bout(job):
         out = {
             "bout_key": key, "recording": rec, "bout_num": int(key.split("_bout")[1]), "gzip": gz_name,
             "wav_src": os.path.basename(str(wav_path)), "sr_native": int(sr_native), "n_native": n_native,
-            "duration_ms": dur_ms, "n_sylls": n, "png": f"img/{key}.png", "audio": f"audio/{key}.wav",
+            "duration_ms": dur_ms, "n_sylls": n, "png": f"img/{key}.png", "png_chipper": f"img/{key}_chipper.png", "audio": f"audio/{key}.wav",
             "img_w": w, "img_h": h, "px_per_ms": px_per_ms(), "fmax_hz": config.RENDER_FMAX,
             "hpf_hz": hpf_hz, "lpf_hz": lpf_hz,
             "onsets_ms": [float(v) for v in al.onsets_ms], "offsets_ms": [float(v) for v in al.offsets_ms],
