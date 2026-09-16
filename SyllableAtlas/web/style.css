@@ -65,3 +65,12 @@ body.page-glossary .row:not(:first-child) { display: none; }
 #dcanvas { cursor: pointer; }
 #loadings { width: 340px; border-left: 1px solid var(--line); background: var(--parchment-50); overflow: auto; }
 #loadings[hidden] { display: none; }
+#pcapanel { border-bottom: 1px solid var(--line); padding: 8px; }
+#pcapanel[hidden] { display: none; }
+.phead { display: flex; justify-content: space-between; align-items: baseline; }
+.pbtns { display: flex; gap: 5px; margin: 6px 0; }
+.phint { font-size: 11px; color: var(--muted); margin-bottom: 6px; line-height: 1.4; }
+#pcalist .pg { color: var(--brass); font-size: 10px; text-transform: uppercase; letter-spacing: .12em; margin: 7px 0 2px; }
+#pcalist .pr { display: grid; grid-template-columns: 1fr 44px; align-items: center; font-size: 11.5px; }
+#pcalist .pr label { gap: 5px; font-size: 11.5px; }
+#pcalist .pr .lg { color: var(--muted); font-size: 10.5px; }

@@ -121,7 +121,9 @@ and `bouts.json` (what the web app loads), `meta.json` (field groups + docs).
   filtered syllables and recomputed when the filter changes. Axis titles carry the
   variance explained, a side panel shows the 15 largest PC1 loadings (PC1/PC2/PC3
   bars), and "PC1–3" puts PC3 on the Z axis. `pc1`–`pc3` are also selectable directly
-  in the axis dropdowns.
+  in the axis dropdowns. **features…** opens a checklist to choose which computed
+  features enter the PCA and which are log10-transformed first; the banner always
+  states the inputs actually used, and the choice is remembered in the browser.
 - **Filters**: region / era / source multi-selects, "only bouts in the 2022
   analysis", "hide QA-flagged bouts", and a free expression such as
   `duration_ms > 100 && cluster_2022 == '1978'`.

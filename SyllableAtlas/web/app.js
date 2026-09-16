@@ -34,6 +34,7 @@ async function load() {
   bouts._rows = {};
   cols.bout_key.forEach((k, i) => (bouts._rows[k] ??= []).push(i));
   for (const k in bouts._rows) bouts._rows[k].sort((a, b) => cols.syll_num[a] - cols.syll_num[b]);
+  pcaDefaults(); loadPcaSel();
   buildControls();
   $('status').textContent = `${N.toLocaleString()} syllables · ${meta.n_bouts.toLocaleString()} bouts · built ${meta.built}`;
   redraw();
@@ -106,6 +107,10 @@ function buildControls() {
     syncAxisControls(); redraw();
   });
   $('pca3d').addEventListener('click', () => { state.z = state.z === 'pc3' ? '' : 'pc3'; syncAxisControls(); redraw(); });
+  $('pcafeat').addEventListener('click', () => { const pnl = $('pcapanel'); pnl.hidden = !pnl.hidden; $('pcafeat').classList.toggle('on', !pnl.hidden); if (!pnl.hidden) { renderPcaPanel(); syncPcaPanel(); } });
+  $('pcareset').addEventListener('click', () => { pcaDefaults(); savePcaSel(); syncPcaPanel(); redraw(); });
+  $('pcaall').addEventListener('click', () => { pcaSel.feats = new Set(pcaCandidates().flatMap((g) => g.columns)); savePcaSel(); syncPcaPanel(); redraw(); });
+  $('pcanone').addEventListener('click', () => { pcaSel.feats = new Set(); savePcaSel(); syncPcaPanel(); redraw(); });
   $('dclose').addEventListener('click', unpin);
   $('dstop').addEventListener('click', stopAudio);
   $('dcanvas').addEventListener('click', (ev) => {          // click a syllable bar/region in the pinned song to switch to it
@@ -192,7 +197,14 @@ const GLOSSARY = [
       ['inputs', 'Only features that exist for every syllable: duration, Chipper upper/lower frequency, peak / mean / 5 % / 95 % frequencies, centroid, bandwidth, roll-off, flatness, flux, spectral / temporal / Wiener entropy, AM, pitch goodness, attack time, and the Viterbi median peak, bandwidth and filtered FM. Each is z-scored; duration, flux, Viterbi bandwidth and FM are log10-transformed first.'],
       ['not used', '2022-table values (missing for 230 bouts), pyin f0 (missing for short syllables), position in bout, recording metadata, latitude/longitude.'],
       ['parameters', 'umap-learn, n_neighbors 15, min_dist 0.1, euclidean, random_state 0.'],
-      ['PCA view', 'Principal components of the same z-scored inputs, computed in the browser on whatever subset is currently filtered (so it changes with the filters). Axis titles give the variance explained; the side panel shows the 15 features with the largest PC1 loadings.'],
+    ] },
+  { title: 'PCA', intro: 'Principal component analysis computed in the browser on whatever syllables are currently filtered, so it changes when the filters change. By default it uses the same 21 z-scored inputs as the UMAP; the features… button lets you choose any set of computed features and which of them to log10-transform first. Each input is standardized (mean 0, sd 1) over the filtered syllables, the covariance matrix is diagonalized (Jacobi rotations), and syllables are projected onto the first three components. Syllables missing any chosen value are left out (the banner says how many).',
+    terms: [
+      ['pc1 / pc2 / pc3', 'Scores on the first three components; the axis titles show the % of total variance each explains. Signs are arbitrary (a component may flip when the subset changes).'],
+      ['feature loadings', 'Side panel: the 15 features with the largest |PC1| loading, with their PC1 (brass), PC2 (teal) and PC3 (red, when PC1–3 is on) coefficients. Large same-sign loadings move together along that component.'],
+      ['features…', 'Opens the input checklist: tick features to include, tick log to log10-transform heavy-tailed ones (log10(x + 1), or shifted so the minimum is 1 for features that can be negative). reset to UMAP set restores the default. Your selection is remembered in the browser.'],
+      ['PC1–3', 'Puts PC3 on the Z axis (3-D view).'],
+      ['UMAP vs PCA', 'UMAP is precomputed once over all syllables and preserves local neighborhoods non-linearly; PCA is linear, recomputed on the current subset, and its axes have interpretable loadings.'],
     ] },
   { title: 'Position in bout', terms: [
       ['syll_num / n_sylls_in_bout / rel_position', 'Order in the song, song length in syllables, and (k−1)/(n−1).'],
@@ -322,7 +334,45 @@ function syncAxisControls() {
 }
 
 /* ------------------------------------------------------------------ PCA (in-browser, on the filtered subset, same inputs as UMAP) */
-let pca = null;   // { n, ev: [..], loadings: [{feature, pc1, pc2, pc3}] }
+let pca = null;   // { n, ev: [..], loadings: [{feature, pc1, pc2, pc3}], nMissing }
+const pcaSel = { feats: null, logs: null };            // Sets; null until initialised from meta
+function pcaDefaults() {
+  const u = meta.umap;
+  pcaSel.feats = new Set(u ? u.features : numericFields().filter((f) => !/^(table_|umap|pc\d|bout_)/.test(f)));
+  pcaSel.logs = new Set(u ? u.log10_transformed : []);
+}
+function pcaCandidates() {                             // features the user may pick from (grouped)
+  return meta.groups.filter((g) => !/^(Original 2022|UMAP|PCA)/.test(g.name)).map((g) => ({ name: g.name, columns: g.columns.filter((c) => cols[c]) }));
+}
+function renderPcaPanel() {
+  const list = $('pcalist');
+  if (list.dataset.done) return;
+  list.dataset.done = '1';
+  for (const g of pcaCandidates()) {
+    const h = document.createElement('div'); h.className = 'pg'; h.textContent = g.name; list.appendChild(h);
+    for (const c of g.columns) {
+      const row = document.createElement('div'); row.className = 'pr';
+      row.innerHTML = `<label><input type="checkbox" data-f="${c}" ${pcaSel.feats.has(c) ? 'checked' : ''}/> ${prettyName(c)}</label>` +
+                      `<label class="lg"><input type="checkbox" data-log="${c}" ${pcaSel.logs.has(c) ? 'checked' : ''}/> log</label>`;
+      list.appendChild(row);
+    }
+  }
+  list.addEventListener('change', (e) => {
+    const t = e.target;
+    if (t.dataset.f) { t.checked ? pcaSel.feats.add(t.dataset.f) : pcaSel.feats.delete(t.dataset.f); }
+    if (t.dataset.log) { t.checked ? pcaSel.logs.add(t.dataset.log) : pcaSel.logs.delete(t.dataset.log); }
+    savePcaSel(); redraw();
+  });
+}
+function syncPcaPanel() {
+  $('pcalist').querySelectorAll('input[data-f]').forEach((el) => { el.checked = pcaSel.feats.has(el.dataset.f); });
+  $('pcalist').querySelectorAll('input[data-log]').forEach((el) => { el.checked = pcaSel.logs.has(el.dataset.log); });
+  $('pcacount').textContent = `${pcaSel.feats.size} selected`;
+}
+function savePcaSel() { try { localStorage.setItem('atlas.pca', JSON.stringify({ feats: [...pcaSel.feats], logs: [...pcaSel.logs] })); } catch (e) { /* private mode */ } }
+function loadPcaSel() {
+  try { const v = JSON.parse(localStorage.getItem('atlas.pca')); if (v && v.feats?.length) { pcaSel.feats = new Set(v.feats.filter((f) => cols[f])); pcaSel.logs = new Set(v.logs || []); } } catch (e) { /* ignore */ }
+}
 function jacobiEigen(Ain) {           // symmetric eigen-decomposition (Jacobi rotations); returns {values, vectors(cols)}
   const n = Ain.length, A = Ain.map((r) => r.slice()), V = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)));
   for (let sweep = 0; sweep < 100; sweep++) {
@@ -341,12 +391,15 @@ function jacobiEigen(Ain) {           // symmetric eigen-decomposition (Jacobi r
   return { values: order.map((i) => A[i][i]), vectors: order.map((i) => V.map((row) => row[i])) };
 }
 function computePCA(idx) {
-  const u = meta.umap, feats = u ? u.features : [], logs = new Set(u ? u.log10_transformed : []);
-  const offs = { duration_ms: 0, spectral_flux_mean: 1e-6, vit_peak_bandwidth_hz: 1, vit_fm_filtered_khz_s: 1 };
+  if (!pcaSel.feats) pcaDefaults();
+  const order = numericFields(), feats = [...pcaSel.feats].filter((f) => cols[f]).sort((a, b) => order.indexOf(a) - order.indexOf(b)), logs = pcaSel.logs;
   const rows = idx.filter((i) => feats.every((f) => cols[f][i] != null && Number.isFinite(+cols[f][i])));
   const m = feats.length, n = rows.length;
-  if (n < m + 2) { pca = null; return; }
-  const X = rows.map((i) => feats.map((f) => (logs.has(f) ? Math.log10(+cols[f][i] + (offs[f] ?? 0)) : +cols[f][i])));
+  if (m < 2 || n < m + 2) { pca = null; return; }
+  // log10(x + c): c = 1 when the feature is non-negative (log1p-like, tames values near 0), else shifts the minimum to 1
+  const offs = {};
+  for (const f of feats) if (logs.has(f)) { let mn = Infinity; for (const i of rows) mn = Math.min(mn, +cols[f][i]); offs[f] = mn >= 0 ? 1 : 1 - mn; }
+  const X = rows.map((i) => feats.map((f) => (logs.has(f) ? Math.log10(+cols[f][i] + offs[f]) : +cols[f][i])));
   const mean = feats.map((_, j) => X.reduce((a, r) => a + r[j], 0) / n);
   const sd = feats.map((_, j) => Math.sqrt(X.reduce((a, r) => a + (r[j] - mean[j]) ** 2, 0) / n) || 1);
   for (const r of X) for (let j = 0; j < m; j++) r[j] = (r[j] - mean[j]) / sd[j];
@@ -355,12 +408,14 @@ function computePCA(idx) {
   for (let a = 0; a < m; a++) for (let b = a; b < m; b++) { C[a][b] /= n - 1; C[b][a] = C[a][b]; }
   const { values, vectors } = jacobiEigen(C), tot = values.reduce((a, v) => a + v, 0);
   ['pc1', 'pc2', 'pc3'].forEach((c, k) => { cols[c] = new Array(N).fill(null); rows.forEach((i, r) => { cols[c][i] = X[r].reduce((a, v, j) => a + v * vectors[k][j], 0); }); });
-  pca = { n, ev: values.slice(0, 3).map((v) => v / tot), loadings: feats.map((f, j) => ({ feature: f, pc1: vectors[0][j], pc2: vectors[1][j], pc3: vectors[2][j] })) };
+  pca = { n, nMissing: idx.length - n, feats, logs: feats.filter((f) => logs.has(f)),
+    ev: values.slice(0, 3).map((v) => v / tot), loadings: feats.map((f, j) => ({ feature: f, pc1: vectors[0][j], pc2: vectors[1][j], pc3: vectors[2][j] ?? 0 })) };
 }
 function drawLoadings() {
   const box = $('loadings');
-  if (state.view !== 'pca' || !pca) { box.hidden = true; return; }
+  if (state.view !== 'pca') { box.hidden = true; return; }
   box.hidden = false;
+  if (!pca) { Plotly.purge($('loadplot')); return; }
   const top = [...pca.loadings].sort((a, b) => Math.abs(b.pc1) - Math.abs(a.pc1)).slice(0, 15).reverse();
   const traces = [
     { type: 'bar', orientation: 'h', name: 'PC1', x: top.map((l) => l.pc1), y: top.map((l) => l.feature), marker: { color: '#b08527' } },
@@ -377,11 +432,15 @@ function updateUmapNote() {
   const n = $('umapnote'), u = meta.umap, on = [state.x, state.y, state.z].some((f) => /^umap/.test(f || ''));
   $('umapbtn').classList.toggle('on', on);
   $('pcabtn').classList.toggle('on', state.view === 'pca'); $('pca3d').hidden = state.view !== 'pca'; $('pca3d').classList.toggle('on', state.z === 'pc3');
+  $('pcafeat').hidden = state.view !== 'pca'; if (state.view === 'pca' && pcaSel.feats) $('pcacount').textContent = `${pcaSel.feats.size} selected`;
   if (state.view === 'pca' && u) {
     n.hidden = false;
-    const ev = pca ? pca.ev.map((v) => (v * 100).toFixed(0) + '%').join(' / ') : '…';
-    n.innerHTML = `<b>PCA</b> of the ${pca ? pca.n.toLocaleString() : '…'} currently filtered syllables · variance explained PC1 / PC2 / PC3: ${ev} · same ${u.features.length} z-scored inputs as the UMAP` +
-      ` (log10 first: ${u.log10_transformed.join(', ')}). <b>Inputs:</b> ${u.features.join(', ')}. <b>Not used:</b> ${u.excluded_on_purpose}. Recomputed whenever the filter changes.`;
+    if (!pca) { n.innerHTML = '<b>PCA</b> — pick at least 2 features (features… button) with enough complete syllables.'; return; }
+    const ev = pca.ev.map((v) => (v * 100).toFixed(0) + '%').join(' / ');
+    const isDefault = u && pca.feats.length === u.features.length && pca.feats.every((f) => u.features.includes(f)) && pca.logs.length === u.log10_transformed.length && pca.logs.every((f) => u.log10_transformed.includes(f));
+    n.innerHTML = `<b>PCA</b> of the ${pca.n.toLocaleString()} currently filtered syllables${pca.nMissing ? ` (${pca.nMissing.toLocaleString()} left out for missing values)` : ''} · variance explained PC1 / PC2 / PC3: ${ev} · ` +
+      `${pca.feats.length} z-scored inputs${isDefault ? ' (the UMAP set)' : ' (custom — features… button)'}${pca.logs.length ? `, log10 first: ${pca.logs.join(', ')}` : ''}. ` +
+      `<b>Inputs:</b> ${pca.feats.join(', ')}. Recomputed whenever the filter or the selection changes.`;
     return;
   }
   if (!on || !u) { n.hidden = true; return; }
