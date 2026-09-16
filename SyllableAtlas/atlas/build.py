@@ -54,11 +54,12 @@ GROUPS = [
     ("Original 2022 analysis", ["table_duration_ms", "table_freq_mod_hz", "table_upper_freq_hz", "table_lower_freq_hz", "table_n_notes"]),
     ("Chipper (from gzip)", ["chipper_duration_ms", "chipper_upper_freq_hz", "chipper_lower_freq_hz", "chipper_freq_range_hz"]),
     ("Spectral", ["peak_frequency_hz", "mean_frequency_hz", "freq_lo_5pct_hz", "freq_hi_95pct_hz", "spectral_centroid",
-                  "spectral_bandwidth", "spectral_rolloff", "spectral_flatness", "spectral_flux_mean", "zcr_mean"]),
+                  "spectral_bandwidth", "spectral_rolloff", "spectral_flatness", "spectral_flux_mean"]),
+    ("Pitch", ["f0_median", "f0_min", "f0_max", "f0_std", "pitch_goodness"]),
+    ("Entropy & modulation", ["spectral_entropy", "temporal_entropy", "wiener_entropy", "am_mean", "rms_mean", "attack_time"]),
     ("Viterbi peak track (newFM)", ["vit_peak_freq_med_hz", "vit_peak_freq_max_hz", "vit_peak_freq_min_hz", "vit_peak_bandwidth_hz",
                                     "vit_fm_raw_khz_s", "vit_fm_filtered_khz_s"]),
-    ("Pitch", ["f0_median", "f0_min", "f0_max", "f0_std", "pitch_confidence", "pitch_goodness"]),
-    ("Entropy & modulation", ["spectral_entropy", "temporal_entropy", "wiener_entropy", "fm_mean", "am_mean", "rms_mean", "attack_time"]),
+    ("UMAP (see umap_meta.json for inputs)", ["umap_1", "umap_2", "umap3_1", "umap3_2", "umap3_3"]),
     ("Position in bout", ["syll_num", "n_sylls_in_bout", "rel_position", "onset_ms", "offset_ms", "gap_before_ms", "gap_after_ms",
                           "bout_duration_ms", "duration_ms"]),
     ("Location & time", ["latitude", "longitude", "year_num"]),
@@ -222,6 +223,14 @@ def assemble():
                 row["syllable_pattern_id"] = "NA"
             rows.append(row)
 
+    umap_path = config.DATA_DIR / "umap.csv"
+    if umap_path.exists():
+        um = {}
+        with open(umap_path, newline="") as fh:
+            for r in csv.DictReader(fh):
+                um[r["id"]] = {k: _num(v) for k, v in r.items() if k != "id"}
+        for r in rows:
+            r.update(um.get(r["id"], {"umap_1": None, "umap_2": None, "umap3_1": None, "umap3_2": None, "umap3_3": None}))
     numeric = [c for _, cols in GROUPS for c in cols]
     fields = ["id", "name"] + CATEGORICAL + ["bout_num"] + numeric
     fields = list(dict.fromkeys(fields))
@@ -235,8 +244,9 @@ def assemble():
     with open(config.DATA_DIR / "bouts.json", "w") as fh:
         json.dump(bouts, fh, allow_nan=False)
     from .features import FEATURE_DOC
+    umap_meta = json.load(open(config.DATA_DIR / "umap_meta.json")) if (config.DATA_DIR / "umap_meta.json").exists() else None
     with open(config.DATA_DIR / "meta.json", "w") as fh:
-        json.dump({"groups": [{"name": n, "columns": c} for n, c in GROUPS], "categorical": CATEGORICAL,
+        json.dump({"groups": [{"name": n, "columns": c} for n, c in GROUPS], "categorical": CATEGORICAL, "umap": umap_meta,
                    "doc": FEATURE_DOC, "n_syllables": len(rows), "n_bouts": len(bouts),
                    "built": time.strftime("%Y-%m-%d %H:%M")}, fh)
 
@@ -289,6 +299,7 @@ def main(argv=None):
     ap.add_argument("--force", action="store_true", help="recompute bouts already cached")
     ap.add_argument("--workers", type=int, default=config.N_WORKERS)
     ap.add_argument("--assemble-only", action="store_true", help="skip processing; just rebuild the tables from cache")
+    ap.add_argument("--no-umap", action="store_true", help="skip the UMAP projection step")
     args = ap.parse_args(argv)
     for d in (config.DATA_DIR, config.IMG_DIR, config.AUDIO_DIR, config.CACHE_DIR):
         d.mkdir(parents=True, exist_ok=True)
@@ -318,6 +329,10 @@ def main(argv=None):
         for k, e in errors:
             print("ERROR", k, e)
     assemble()
+    if not args.no_umap:
+        from .umap_map import run as run_umap
+        run_umap()
+        assemble()      # merge umap_1/2 (+3-D) into the tables
 
 
 if __name__ == "__main__":

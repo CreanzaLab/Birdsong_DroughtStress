@@ -29,19 +29,16 @@ FEATURE_DOC = {
     "spectral_bandwidth": "mean spectral bandwidth (Hz)",
     "spectral_flatness": "mean spectral flatness (0 tone .. 1 noise)",
     "spectral_rolloff": "mean 85% roll-off frequency (Hz)",
-    "spectral_entropy": "normalised Shannon entropy of the spectrum, averaged over frames",
-    "temporal_entropy": "normalised entropy of the RMS envelope",
+    "spectral_entropy": "normalized Shannon entropy of the spectrum, averaged over frames",
+    "temporal_entropy": "normalized entropy of the RMS envelope",
     "wiener_entropy": "mean log spectral flatness (SAP tonality; 0 noise, negative = tonal)",
     "pitch_goodness": "SAP goodness of pitch: prominence of the cepstral peak",
     "f0_median": "median pyin pitch (Hz), 1-10 kHz",
     "f0_std": "std of the pyin pitch contour (Hz)",
     "f0_min": "min voiced pyin pitch (Hz)",
     "f0_max": "max voiced pyin pitch (Hz)",
-    "pitch_confidence": "mean pyin voicing probability",
-    "fm_mean": "frequency modulation: mean |delta centroid| per frame (Hz)",
     "am_mean": "amplitude modulation: mean |delta log power| per frame",
     "spectral_flux_mean": "mean positive spectral flux",
-    "zcr_mean": "mean zero-crossing rate",
     "attack_time": "time from onset to RMS peak (s)",
 }
 FEATURE_NAMES = list(FEATURE_DOC)
@@ -119,7 +116,6 @@ def compute(y: np.ndarray, sr: int, band_hz: tuple[float, float] | None = None) 
     bandwidth = librosa.feature.spectral_bandwidth(S=mag, sr=sr)[0]
     flatness = librosa.feature.spectral_flatness(S=mag)[0]
     rolloff = librosa.feature.spectral_rolloff(S=mag, sr=sr, roll_percent=config.ROLLOFF_PERCENT)[0]
-    zcr = librosa.feature.zero_crossing_rate(y, frame_length=config.N_FFT, hop_length=config.HOP)[0]
 
     P = mag ** 2
     denom = P.sum(axis=0)
@@ -151,10 +147,7 @@ def compute(y: np.ndarray, sr: int, band_hz: tuple[float, float] | None = None) 
         "wiener_entropy": float(np.mean(np.log(flatness + _EPS))),
         "pitch_goodness": _pitch_goodness(mag, sr),
         "f0_median": f0_med, "f0_std": f0_std, "f0_min": f0_min, "f0_max": f0_max,
-        "pitch_confidence": conf,
-        "fm_mean": float(np.mean(np.abs(np.diff(centroid)))) if centroid.size > 1 else float("nan"),
         "am_mean": float(np.mean(np.abs(np.diff(log_e)))) if log_e.size > 1 else float("nan"),
         "spectral_flux_mean": float(flux),
-        "zcr_mean": float(zcr.mean()),
         "attack_time": float(attack),
     }

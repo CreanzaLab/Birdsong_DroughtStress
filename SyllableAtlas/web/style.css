@@ -56,3 +56,7 @@ main { flex: 1; min-height: 0; display: flex; }
 #glossary dt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #234f4f; text-align: right; }
 #glossary dd { margin: 0; font-size: 13px; color: var(--ink-soft); }
 body.page-glossary .row:not(:first-child) { display: none; }
+.note { padding: 5px 12px; font-size: 12px; color: var(--ink-soft); background: var(--parchment-200); border-bottom: 1px solid var(--line); line-height: 1.45; }
+.note[hidden] { display: none; }
+.note b { color: var(--ink); }
+#dcanvas { cursor: pointer; }

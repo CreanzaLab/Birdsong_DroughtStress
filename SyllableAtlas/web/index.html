@@ -31,6 +31,7 @@
     <label>Y <select id="y"></select></label>
     <label>Z <select id="z"><option value="">(2D)</option></select></label>
     <label>Color <select id="color"></select></label>
+    <button id="umapbtn" class="tab" title="set X/Y to the UMAP projection of the acoustic features">UMAP view</button>
     <label class="chk" title="log-scale X"><input type="checkbox" id="logx" /> log X</label>
     <label class="chk" title="log-scale Y"><input type="checkbox" id="logy" /> log Y</label>
   </div>
@@ -38,7 +39,6 @@
     <label>Region <select id="f_region" multiple size="1"></select></label>
     <label>Era <select id="f_era" multiple size="1"></select></label>
     <label>Source <select id="f_source" multiple size="1"></select></label>
-    <label>State <select id="f_state" multiple size="1"></select></label>
     <label class="chk"><input type="checkbox" id="f_final" checked /> only bouts in the 2022 analysis</label>
     <label class="chk"><input type="checkbox" id="f_qa" checked /> hide QA-flagged bouts</label>
     <input id="expr" class="input mono" placeholder="filter expression, e.g. duration_ms > 100 && region == 'Drought'  (Enter)" />
@@ -46,6 +46,7 @@
   </div>
 </header>
 
+<div id="umapnote" class="note" hidden></div>
 <main>
   <div id="plot"></div>
   <section id="glossary" hidden></section>

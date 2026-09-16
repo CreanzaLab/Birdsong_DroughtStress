@@ -55,8 +55,10 @@ For each `SegSyllsOutput_<rec>_bout<n>.gzip` with a matching wav:
    filter bar) and marks them ⚠ on hover.
 4. **Bounding box** — spectral features are computed strictly inside Chipper's box:
    the syllable's onset→offset in time, and the bout's `FrequencyFilter` (high-pass /
-   low-pass rows × Hz-per-pixel, rows counted from 0 Hz) in frequency. The clip is
-   band-pass filtered to that band (floor 500 Hz) and STFT bins outside it are zeroed.
+   low-pass rows × Hz-per-pixel, rows counted from 0 Hz) in frequency. **The high-pass
+   is never below 500 Hz**: if Chipper's cutoff was lower, 500 Hz is used; if higher,
+   Chipper's value is used. The clip is band-pass filtered to that band and STFT bins
+   outside it are zeroed.
    The Viterbi peak track is further restricted to the *syllable's* Chipper
    lower/upper frequency bounds, as in the R script. Saved audio and images are
    unfiltered.
@@ -79,11 +81,19 @@ For each `SegSyllsOutput_<rec>_bout<n>.gzip` with a matching wav:
      edge-artifact trimming, 3-point median: `vit_peak_freq_med/max/min_hz`,
      `vit_peak_bandwidth_hz`, `vit_fm_raw_khz_s`, `vit_fm_filtered_khz_s`.
    - *Spectral*: peak / mean frequency, 5 % and 95 % energy frequencies, centroid,
-     bandwidth, roll-off, flatness, flux, zero-crossing rate.
-   - *Pitch*: pyin f0 median/min/max/std (1–10 kHz), voicing confidence, SAP
-     goodness of pitch.
+     bandwidth, roll-off, flatness, flux.
+   - *Pitch*: pyin f0 median/min/max/std (1–10 kHz), SAP goodness of pitch.
    - *Entropy & modulation*: spectral entropy, temporal entropy, Wiener entropy,
-     FM, AM, RMS, attack time.
+     AM, RMS, attack time.
+   - *UMAP*: `umap_1`, `umap_2` (and `umap3_1..3`) from `atlas/umap_map.py`, run
+     automatically at the end of `atlas.build` (or `python -m atlas.umap_map`). Inputs
+     are only features that exist for every syllable — duration, Chipper upper/lower
+     frequency, the spectral group, the entropy group, AM, pitch goodness, attack time,
+     and the Viterbi median peak / bandwidth / filtered FM — each z-scored (duration,
+     flux, Viterbi bandwidth and FM log10-transformed first); n_neighbors 15,
+     min_dist 0.1. NOT used: 2022-table values, pyin f0, position in bout, metadata,
+     lat/lon. The exact list is written to `atlas_data/umap_meta.json` and shown in a
+     banner in the app whenever a UMAP axis is selected.
    - *Position in bout*: syllable number, syllables in bout, relative position,
      onset/offset (audio ms), gaps before/after, bout duration.
    - *Location & time*: latitude, longitude, year.
@@ -103,7 +113,8 @@ and `bouts.json` (what the web app loads), `meta.json` (field groups + docs).
   thousands of points on every hover).
 - **Color**: any categorical field (grouped legend, click to isolate) or numeric
   feature (continuous scale).
-- **Filters**: region / era / source / state multi-selects, "only bouts in the 2022
+- **UMAP view** button: sets X/Y to the UMAP projection and shows the input banner.
+- **Filters**: region / era / source multi-selects, "only bouts in the 2022
   analysis", "hide QA-flagged bouts", and a free expression such as
   `duration_ms > 100 && cluster_2022 == '1978'`.
 - **Hover** → `syllable`: the syllable's spectrogram (with a little context, dashed
@@ -112,6 +123,8 @@ and `bouts.json` (what the web app loads), `meta.json` (field groups + docs).
 - **Play** → `off` / `syllable` / `whole song` on hover.
 - **Click** a point to pin it: detail panel with the full song, all syllable bars,
   play buttons and every feature value; the path stays until you close it (Esc).
+  Click any syllable in the pinned song's spectrogram to switch the panel, the
+  highlighted point and the dark bar to that syllable.
 
 ## Layout
 
@@ -121,6 +134,7 @@ SyllableAtlas/
   atlas/chipper.py   gzip reader, name normalisation, onset alignment + QA
   atlas/features.py  per-syllable features
   atlas/viterbi.py   Viterbi peak-frequency track + newFM (port of 02_CalculateSyllableMetrics_newFM.R)
+  atlas/umap_map.py  UMAP projection of the acoustic features (inputs recorded in atlas_data/umap_meta.json)
   atlas/render.py    bout spectrogram PNG
   atlas/build.py     the pipeline (multiprocess, resumable) + table assembly + QA report
   serve.py           tiny static server

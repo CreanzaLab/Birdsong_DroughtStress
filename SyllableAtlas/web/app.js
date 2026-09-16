@@ -1,6 +1,6 @@
 /* Song Sparrow Syllable Atlas — static, single-page.
    Data: atlas_data/syllables.json (columnar), bouts.json (per-bout audio/image/onsets), meta.json (field groups).
-   Interaction model follows sound-library's Plots page (hover -> spectrogram + optional audio, colour by anything,
+   Interaction model follows sound-library's Plots page (hover -> spectrogram + optional audio, color by anything,
    click -> pinned detail) plus the "bout path" mode: hovering a syllable draws the path through every syllable of
    its bout in the current axes and shows the whole song with the hovered syllable marked. */
 
@@ -63,7 +63,7 @@ function buildControls() {
     cs.appendChild(og);
   }
   $('x').value = state.x; $('y').value = state.y; $('color').value = state.color;
-  for (const f of ['region', 'era', 'source', 'state']) {
+  for (const f of ['region', 'era', 'source']) {
     const sel = $('f_' + f), vals = [...new Set(cols[f])].sort();
     vals.forEach((v) => sel.appendChild(opt(v)));
     sel.size = 1; sel.addEventListener('change', redraw);
@@ -73,7 +73,7 @@ function buildControls() {
   ['f_final', 'f_qa'].forEach((k) => $(k).addEventListener('change', redraw));
   $('expr').addEventListener('keydown', (e) => { if (e.key === 'Enter') { state.expr = e.target.value.trim(); redraw(); } });
   $('clear').addEventListener('click', () => {
-    ['region', 'era', 'source', 'state'].forEach((f) => { for (const o of $('f_' + f).options) o.selected = false; });
+    ['region', 'era', 'source'].forEach((f) => { for (const o of $('f_' + f).options) o.selected = false; });
     $('f_final').checked = false; $('f_qa').checked = false; $('expr').value = ''; state.expr = ''; redraw();
   });
   document.querySelectorAll('[data-hover]').forEach((b) => b.addEventListener('click', () => {
@@ -84,8 +84,25 @@ function buildControls() {
     state.play = b.dataset.play; document.querySelectorAll('[data-play]').forEach((x) => x.classList.toggle('on', x === b));
     stopAudio();
   }));
+  $('umapbtn').addEventListener('click', () => {
+    if (!cols.umap_1) { alert('No UMAP columns in this build — run  python -m atlas.umap_map  then  python -m atlas.build --assemble-only'); return; }
+    state.x = 'umap_1'; state.y = 'umap_2'; state.z = ''; state.logx = state.logy = false;
+    $('x').value = 'umap_1'; $('y').value = 'umap_2'; $('z').value = ''; $('logx').checked = false; $('logy').checked = false;
+    redraw();
+  });
   $('dclose').addEventListener('click', unpin);
   $('dstop').addEventListener('click', stopAudio);
+  $('dcanvas').addEventListener('click', (ev) => {          // click a syllable bar/region in the pinned song to switch to it
+    if (state.pinned == null || !$('dcanvas').dataset.xof) return;
+    const r = $('dcanvas').getBoundingClientRect(), scale = $('dcanvas').width / r.width;
+    const x = (ev.clientX - r.left) * scale, g = JSON.parse($('dcanvas').dataset.xof);
+    const ms = g.t0 + ((x - g.L) / g.W) * (g.t1 - g.t0);
+    const b = bouts[cols.bout_key[state.pinned]], rows = bouts._rows[b.bout_key];
+    let k = b.onsets_ms.findIndex((a, j) => ms >= a && ms <= b.offsets_ms[j]);
+    if (k < 0) { let best = Infinity; b.onsets_ms.forEach((a, j) => { const d = Math.min(Math.abs(ms - a), Math.abs(ms - b.offsets_ms[j])); if (d < best) { best = d; k = j; } }); }
+    const row = rows.find((i) => cols.syll_num[i] === k + 1);
+    if (row != null && row !== state.pinned) { pin(row); if (state.play !== 'off') playRow(row, 'syllable'); }
+  });
   $('dplaysyll').addEventListener('click', () => state.pinned != null && playRow(state.pinned, 'syllable'));
   $('dplaysong').addEventListener('click', () => state.pinned != null && playRow(state.pinned, 'song'));
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { unpin(); stopAudio(); } });
@@ -93,22 +110,22 @@ function buildControls() {
 
 /* ------------------------------------------------------------------ glossary */
 const GLOSSARY = [
-  { title: 'Reading the atlas', intro: 'Every point is one Chipper-segmented syllable. Hover a point to see its spectrogram (time left→right, 0–10 kHz bottom→top, darkness = energy; each bout image is auto-levelled to its own peak over a 55 dB window). In bout-path mode the whole song is shown, the brass bar under the spectrogram marks the hovered syllable\'s onset→offset, and the black line on the plot joins the song\'s syllables in order 1→2→3…  Click a point to pin it; Esc closes.',
+  { title: 'Reading the atlas', intro: 'Every point is one Chipper-segmented syllable. Hover a point to see its spectrogram (time left→right, 0–10 kHz bottom→top, darkness = energy; each bout image is auto-leveled to its own peak over a 55 dB window). In bout-path mode the whole song is shown, the brass bar under the spectrogram marks the hovered syllable\'s onset→offset, and the black line on the plot joins the song\'s syllables in order 1→2→3…  Click a point to pin it; Esc closes.',
     terms: [
       ['syllable', 'A Chipper onset→offset unit inside a bout. Names read "recording bout n · syll k/n".'],
       ['bout', 'One song extracted from a longer recording (the wav Chipper was run on).'],
       ['bout path', 'The polyline through all syllables of the hovered syllable\'s bout, in the current X/Y(/Z) axes.'],
       ['QA flags', 'Per-bout alignment checks (see below). Flagged bouts are hidden by default; untick "hide QA-flagged bouts" to show them.'],
     ] },
-  { title: 'Where the boundaries come from', intro: 'Chipper stores onsets/offsets as sonogram pixel columns. Its sonogram is ~3 175 samples wider than the audio (STFT padding) with the padding split evenly at both ends, so audio time = px × ms/px − pad/2. Every bout is checked: syllables must be louder than the gaps between them at exactly that shift.',
+  { title: 'QA flags', intro: 'Per-bout checks that the wav really is the audio Chipper segmented and that the onsets/offsets land on the sound.',
     terms: [
       ['length_mismatch', 'The wav is not the audio the gzip was made from (different extraction of the same bout). All such wavs were replaced from Box copies whose length matches.'],
-      ['misaligned', 'The energy-maximising shift is more than 12 ms from the derived shift.'],
+      ['misaligned', 'The energy-maximizing shift is more than 12 ms from the derived shift.'],
       ['weak_contrast', 'Syllables are less than 6 dB louder than the gaps (noisy recording).'],
       ['outside_audio', 'An onset or offset falls outside the wav.'],
-      ['bout_hpf_hz / bout_lpf_hz', 'Chipper\'s high-/low-pass cutoffs for the bout (its FrequencyFilter). All spectral features below are computed inside this band and inside the syllable\'s onset→offset.'],
+      ['bout_hpf_hz / bout_lpf_hz', 'High-/low-pass cutoffs used for every spectral feature of the bout: Chipper\'s FrequencyFilter, except that the high-pass is never below 500 Hz (if Chipper\'s was lower, 500 Hz is used; if higher, Chipper\'s value is used). Features are computed inside this band and inside the syllable\'s onset→offset.'],
     ] },
-  { title: 'Original 2022 analysis', intro: 'Values joined from AnalyzedData/2022-11-15_NoteAnalysisBySyll…csv (Snyder, Sellers & Creanza 2025 pipeline). Present only for the 1 575 bouts used in that analysis.',
+  { title: 'Original 2022 analysis', intro: 'Values joined from AnalyzedData/2022-11-15_NoteAnalysisBySyll…csv (Snyder, Sellers & Creanza 2025 pipeline). Present only for the 1,575 bouts used in that analysis.',
     terms: [
       ['table_duration_ms', 'Syllable duration from the Chipper output (ms).'],
       ['table_upper_freq_hz / table_lower_freq_hz', 'Highest / lowest frequency with signal in Chipper\'s thresholded sonogram for the syllable.'],
@@ -118,11 +135,33 @@ const GLOSSARY = [
       ['syllable_pattern_id', 'Within-bout syllable-type id from Chipper (repeats of the same type share an id).'],
       ['removed_as_whistle / probable_whistle', 'Flags from the 2022 note analysis.'],
     ] },
-  { title: 'Chipper (from gzip)', intro: 'The same quantities recomputed directly from every gzip, so they exist for all 1 804 bouts.',
+  { title: 'Chipper (from gzip)', intro: 'The same quantities recomputed directly from every gzip, so they exist for all 1,804 bouts.',
     terms: [
       ['chipper_duration_ms', '(offset − onset) × ms per pixel.'],
       ['chipper_upper_freq_hz / chipper_lower_freq_hz', 'First / last sonogram row with signal, converted with hz per pixel, exactly as the original script.'],
       ['chipper_freq_range_hz', 'Upper minus lower.'],
+    ] },
+  { title: 'Spectral', terms: [
+      ['peak_frequency_hz', 'Bin with the most energy in the syllable\'s mean spectrum.'],
+      ['mean_frequency_hz', 'Power-weighted mean frequency, averaged over frames.'],
+      ['freq_lo_5pct_hz / freq_hi_95pct_hz', 'Frequencies below which 5 % / 95 % of the syllable\'s energy lies — a robust bandwidth.'],
+      ['spectral_centroid', '"Center of mass" of the spectrum (Hz) — high = bright.'],
+      ['spectral_bandwidth', 'Spread of energy around the centroid (Hz).'],
+      ['spectral_rolloff', 'Frequency below which 85 % of the energy lies.'],
+      ['spectral_flatness', '0 = pure tone … 1 = noise.'],
+      ['spectral_flux_mean', 'How fast the spectrum changes frame to frame.'],
+    ] },
+  { title: 'Pitch', terms: [
+      ['f0_median / f0_min / f0_max / f0_std', 'pyin fundamental-frequency contour statistics (1–10 kHz search range).'],
+      ['pitch_goodness', 'Sound Analysis Pro "goodness of pitch": prominence of the cepstral peak; high for clean harmonic sounds.'],
+    ] },
+  { title: 'Entropy & modulation', terms: [
+      ['spectral_entropy', 'Normalized Shannon entropy of the spectrum — low for tones, high for noise.'],
+      ['temporal_entropy', 'How evenly energy is spread over the syllable\'s duration.'],
+      ['wiener_entropy', 'Mean log spectral flatness (SAP tonality): ≈0 noise, large-negative pure tone.'],
+      ['am_mean', 'Mean |Δ log power| per frame — amplitude modulation.'],
+      ['rms_mean', 'Mean RMS amplitude (bout audio is peak-normalized, so comparable within a bout only).'],
+      ['attack_time', 'Seconds from onset to the RMS peak.'],
     ] },
   { title: 'Viterbi peak track (newFM)', intro: 'Port of 02_CalculateSyllableMetrics_newFM.R: an adaptive-window spectrogram of the syllable, restricted to Chipper\'s syllable frequency bounds and to frames within 20 dB of the syllable peak; a Viterbi dynamic-programming path follows the loudest frequency with a 0.05-per-kHz jump penalty; onset/offset artifacts are trimmed and a 3-point median filter applied.',
     terms: [
@@ -132,42 +171,24 @@ const GLOSSARY = [
       ['vit_fm_raw_khz_s', 'Mean |slope| of the raw contour (kHz per second).'],
       ['vit_fm_filtered_khz_s', 'Mean |slope| after the 3-point median filter — the newFM measure.'],
     ] },
-  { title: 'Spectral', terms: [
-      ['peak_frequency_hz', 'Bin with the most energy in the syllable\'s mean spectrum.'],
-      ['mean_frequency_hz', 'Power-weighted mean frequency, averaged over frames.'],
-      ['freq_lo_5pct_hz / freq_hi_95pct_hz', 'Frequencies below which 5 % / 95 % of the syllable\'s energy lies — a robust bandwidth.'],
-      ['spectral_centroid', '"Centre of mass" of the spectrum (Hz) — high = bright.'],
-      ['spectral_bandwidth', 'Spread of energy around the centroid (Hz).'],
-      ['spectral_rolloff', 'Frequency below which 85 % of the energy lies.'],
-      ['spectral_flatness', '0 = pure tone … 1 = noise.'],
-      ['spectral_flux_mean', 'How fast the spectrum changes frame to frame.'],
-      ['zcr_mean', 'Zero-crossing rate.'],
-    ] },
-  { title: 'Pitch', terms: [
-      ['f0_median / f0_min / f0_max / f0_std', 'pyin fundamental-frequency contour statistics (1–10 kHz search range).'],
-      ['pitch_confidence', 'Mean pyin voicing probability (0–1).'],
-      ['pitch_goodness', 'Sound Analysis Pro "goodness of pitch": prominence of the cepstral peak; high for clean harmonic sounds.'],
-    ] },
-  { title: 'Entropy & modulation', terms: [
-      ['spectral_entropy', 'Normalised Shannon entropy of the spectrum — low for tones, high for noise.'],
-      ['temporal_entropy', 'How evenly energy is spread over the syllable\'s duration.'],
-      ['wiener_entropy', 'Mean log spectral flatness (SAP tonality): ≈0 noise, large-negative pure tone.'],
-      ['fm_mean', 'Mean |Δ centroid| per frame (Hz) — a crude frequency-modulation measure; prefer vit_fm_*.'],
-      ['am_mean', 'Mean |Δ log power| per frame — amplitude modulation.'],
-      ['rms_mean', 'Mean RMS amplitude (bout audio is peak-normalised, so comparable within a bout only).'],
-      ['attack_time', 'Seconds from onset to the RMS peak.'],
+  { title: 'UMAP', intro: 'A 2-D (umap_1, umap_2) and 3-D (umap3_1..3) UMAP projection of the acoustic features, like the Sound Atlas map but computed from the feature table (there are no CLAP embeddings here). The exact inputs are listed in the banner when a UMAP axis is selected and in atlas_data/umap_meta.json.',
+    terms: [
+      ['inputs', 'Only features that exist for every syllable: duration, Chipper upper/lower frequency, peak / mean / 5 % / 95 % frequencies, centroid, bandwidth, roll-off, flatness, flux, spectral / temporal / Wiener entropy, AM, pitch goodness, attack time, and the Viterbi median peak, bandwidth and filtered FM. Each is z-scored; duration, flux, Viterbi bandwidth and FM are log10-transformed first.'],
+      ['not used', '2022-table values (missing for 230 bouts), pyin f0 (missing for short syllables), position in bout, recording metadata, latitude/longitude.'],
+      ['parameters', 'umap-learn, n_neighbors 15, min_dist 0.1, euclidean, random_state 0.'],
     ] },
   { title: 'Position in bout', terms: [
       ['syll_num / n_sylls_in_bout / rel_position', 'Order in the song, song length in syllables, and (k−1)/(n−1).'],
+      ['click a syllable in the pinned song', 'In the detail panel, click any syllable in the spectrogram to switch the panel, the highlighted point and the bar to that syllable.'],
       ['onset_ms / offset_ms', 'In audio time (padding removed).'],
-      ['gap_before_ms / gap_after_ms', 'Silence to the neighbouring syllables.'],
+      ['gap_before_ms / gap_after_ms', 'Silence to the neighboring syllables.'],
       ['bout_duration_ms', 'Length of the bout wav.'],
     ] },
-  { title: 'Recording metadata (colour / filter)', terms: [
-      ['recording', 'Macaulay Library catalogue number, Xeno-canto id, or self-recording id.'],
+  { title: 'Recording metadata (color / filter)', terms: [
+      ['recording', 'Macaulay Library catalog number, Xeno-canto id, or self-recording id.'],
       ['source', 'ML = Macaulay Library, XC = Xeno-canto, Self = own 2017 Ithaca recordings.'],
       ['era', 'Pre / Post the 2016 western-New-York drought (plus Pre2006, During, 2020-2021).'],
-      ['region', 'Drought vs Control region as redefined Aug 2022 (RegionPostAug22); region_orig is the earlier definition.'],
+      ['region', 'Drought vs Control region as redefined Aug 2022 (RegionPostAug22); NA = recorded outside both regions. region_orig is the earlier definition.'],
       ['era_region', 'The era × region combination, e.g. Pre-Drought, Post-Control.'],
       ['in_final_table', 'Whether the bout is in the 2022 bout-stats table used for the paper.'],
       ['latitude / longitude / year_num', 'Recording location and year (numeric, usable as axes).'],
@@ -178,7 +199,7 @@ function renderGlossary() {
   if (g.dataset.done) return;
   g.dataset.done = '1';
   const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-  g.innerHTML = `<div class="wrap"><h2>Glossary</h2><p class="sub">What every axis, colour and flag means — and how the syllables were cut out.</p>` +
+  g.innerHTML = `<div class="wrap"><h2>Glossary</h2><p class="sub">What every axis, color and flag means — and how the syllables were cut out.</p>` +
     GLOSSARY.map((sec) => `<h3>${esc(sec.title)}</h3>${sec.intro ? `<p class="intro">${esc(sec.intro)}</p>` : ''}<dl>` +
       sec.terms.map(([n, d]) => `<div class="term"><dt>${esc(n)}</dt><dd>${esc(d)}</dd></div>`).join('') + '</dl>').join('') + '</div>';
 }
@@ -210,7 +231,7 @@ function compileExpr(src) {
 }
 
 function applyFilters() {
-  const sel = { region: selected('f_region'), era: selected('f_era'), source: selected('f_source'), state: selected('f_state') };
+  const sel = { region: selected('f_region'), era: selected('f_era'), source: selected('f_source') };
   const onlyFinal = $('f_final').checked, hideQa = $('f_qa').checked;
   let fn = null, err = '';
   try { fn = compileExpr(state.expr); } catch (e) { err = e.message; }
@@ -277,7 +298,17 @@ function layout(dims) {
 }
 
 let tweenRaf = 0;
+function updateUmapNote() {
+  const n = $('umapnote'), u = meta.umap, on = [state.x, state.y, state.z].some((f) => /^umap/.test(f || ''));
+  $('umapbtn').classList.toggle('on', on);
+  if (!on || !u) { n.hidden = true; return; }
+  n.hidden = false;
+  n.innerHTML = `<b>UMAP</b> of ${u.n_syllables.toLocaleString()} syllables · ${u.features.length} acoustic features, each z-scored` +
+    ` (log10 first: ${u.log10_transformed.join(', ')}) · n_neighbors ${u.params.n_neighbors}, min_dist ${u.params.min_dist}, ${u.params.metric}.` +
+    ` <b>Inputs:</b> ${u.features.join(', ')}. <b>Not used:</b> ${u.excluded_on_purpose}.`;
+}
 function redraw() {
+  updateUmapNote();
   let [idx, err] = applyFilters();
   const dims3 = !!state.z, MAX_3D = 8000;
   let note = '';
@@ -419,6 +450,7 @@ async function drawSyllable(canvas, i, mode, targetW, allBars = false) {
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(im, sx, 0, sw, im.height, L, 0, W, H);
   const xOf = (ms) => L + ((ms - t0) / (t1 - t0)) * W;
+  canvas.dataset.xof = JSON.stringify({ L, W, t0, t1 });   // lets the detail panel map a click back to time
   // syllable bars along the bottom: the selected one solid brass, the others faint
   const y0 = H + 3;
   if (allBars || mode === 'bout') {
