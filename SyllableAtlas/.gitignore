@@ -1,6 +1,0 @@
-# generated atlas outputs (audio, spectrogram PNGs, per-bout cache, tables) live here — rebuild with `python -m atlas.build`
-atlas_data/
-web/vendor/
-.venv/
-__pycache__/
-*.pyc
